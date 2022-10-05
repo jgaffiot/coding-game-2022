@@ -1,0 +1,131 @@
+---
+exclude: ^(build/|install/|log/)
+fail_fast: true
+minimum_pre_commit_version: 1.15.0
+
+repos:
+# bash
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.8.0.4
+    hooks:
+      - id: shellcheck
+        args: [-e, SC2181]
+        types: [shell]
+  #- repo: local
+    #hooks:
+      #- id: shellcheck
+        #name: Shellcheck
+        #entry: shellcheck
+        #language: system
+        #types: [bash]
+  - repo: https://github.com/lovesegfault/beautysh
+    rev: v6.2.1
+    hooks:
+      - id: beautysh
+        args: [--indent-size, '4']
+        types: [shell]
+
+# C++
+  - repo: https://github.com/cheshirekow/cmake-format-precommit
+    rev: v0.6.13
+    hooks:
+      - id: cmake-format
+        args:
+          - --line-width=88
+          - --tab-size=4
+          - --dangle-parens=true
+      - id: cmake-lint
+        args:
+          - --line-width=88
+          - --tab-size=4
+          - --dangle-parens=true
+
+  - repo: local
+    hooks:
+      - id: clang-format
+        name: Clang-format
+        description: Run `clang-format` against C/C++ header and source files
+        language: system
+        files: \.(h\+\+|h|hh|hxx|hpp|cuh|c|cc|cpp|cu|c\+\+|cxx|tpp|txx)$
+        entry: clang-format -i
+
+  - repo: https://github.com/cpplint/cpplint
+    rev: 1.6.1
+    hooks:
+      - id: cpplint
+        types: [c++]
+
+  - repo: local
+    hooks:
+      - id: cppcheck
+        name: CPPcheck
+        description: Run `cppcheck` against C/C++ source files
+        language: system
+        files: \.(c|cc|cpp|cu|c\+\+|cxx|tpp|txx)$
+        entry: cppcheck
+        args:
+          - --enable=warning
+          - --inline-suppr
+          - --project=compile_commands.json
+          - --error-exitcode=1
+          - -D__GNUC__
+
+      - id: compilation
+        name: Compilation
+        description: Compile the project
+        language: system
+        always_run: true
+        entry: make -j all
+        files: Makefile
+
+# Markdown
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.32.2
+    hooks:
+      - id: markdownlint
+        types: [markdown]
+
+# YAML
+  - repo: https://github.com/jumanjihouse/pre-commit-hook-yamlfmt
+    rev: 0.2.2
+    hooks:
+      - id: yamlfmt
+        args: [--mapping, '2', --sequence, '4', --offset, '2', --width, '150']
+        types: [yaml]
+
+# All files + miscellanous
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.3.0
+    hooks:
+      - id: check-added-large-files
+      - id: forbid-new-submodules
+      - id: no-commit-to-branch
+        args: [--branch, master]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        types: [text]
+      - id: fix-byte-order-marker
+        types: [text]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        types: [text]
+      - id: check-merge-conflict
+        types: [text]
+      - id: detect-private-key
+        types: [text]
+      - id: check-executables-have-shebangs
+        types: [text, executable]
+      - id: check-shebang-scripts-are-executable
+        types: [text]
+      - id: check-json
+        types: [json]
+      - id: pretty-format-json
+        types: [json]
+      - id: check-symlinks
+        types: [symlink]
+      - id: destroyed-symlinks
+      - id: check-toml
+        types: [toml]
+      - id: check-yaml
+        types: [yaml]
+
