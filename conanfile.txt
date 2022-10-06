@@ -1,0 +1,15 @@
+[requires]
+boost/1.77.0@external/stable
+sml/1.1.4@external/stable
+libmodbus/3.1.6@external/stable
+acp-common/10.1.0@acp/dev
+
+[generators]
+cmake_find_package
+cmake
+
+[options]
+*:shared=False
+
+[imports]
+lib, *.so* -> .
