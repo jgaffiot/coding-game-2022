@@ -394,14 +394,14 @@ int main() {
             cin.ignore();
             if (type == 0) {  // monsters
                 if (not monsters.contains(id)) {
-                    monsters.emplace(std::pair<int&, Monster>(
+                    monsters.emplace(pair<int&, Monster>(
                         id, {id, {x, y}, health, vx, vy, has_target, threat}));
                 } else {
                     monsters.at(id).update(x, y, health, vx, vy, has_target, threat);
                 }
             } else if (type == 1) {  // heroes
                 if (not heroes.contains(id)) {
-                    heroes.emplace(std::pair<int&, Hero>(id, {id, {x, y}}));
+                    heroes.emplace(pair<int&, Hero>(id, {id, {x, y}}));
                 } else {
                     heroes.at(id).update(x, y);
                 }
