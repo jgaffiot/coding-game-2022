@@ -1,9 +1,9 @@
+#include <algorithm>
+#include <cmath>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
-#include <algorithm>
-#include <sstream>
-#include <cmath>
 
 using namespace std;
 
@@ -134,12 +134,21 @@ inline std::string cat(Args&&... args) {
     return oss.str();
 }
 
+//! An operator<< on all enum types, enabling easy printing to log or debug
+template<typename Enum>
+inline std::ostream& operator<<(
+    typename std::enable_if<std::is_enum<Enum>::value, std::ostream>::type& stream,
+    const Enum& e) {
+    return stream << static_cast<typename std::underlying_type<Enum>::type>(e);
+}
+
 //! The local exception
 class Error: public std::exception {
 public:
     virtual ~Error() noexcept {}
 
     template<typename... Args>
+    // NOLINTNEXTLINE
     Error(Args... args): std::exception() {
         message = cat(args...);
     }
@@ -175,12 +184,10 @@ public:
     uint y() const { return y_; }
     uint at(bool i) const { return i ? y_ : x_; }
 
-    double r() const { return norm2(x_, y_); } //! Modulus
+    double r() const { return norm2(x_, y_); }  //! Modulus
     double theta() const { return atan2(x_, y_); }  //! Argument
     //! Distance to another point
-    double dist_to(const Point& p) const {
-        return norm2(x_ - p.x(), y_ - p.y());
-    }
+    double dist_to(const Point& p) const { return norm2(x_ - p.x(), y_ - p.y()); }
 
     //! Advance the point from the given dist.
     void advance(uint dist) {
@@ -192,7 +199,7 @@ public:
     }
 
     friend std::ostream& operator<<(std::ostream& os, const Point& p) {
-        os << "Point("<<p.x()<<", "<<p.y()<<")";
+        os << "Point(" << p.x() << ", " << p.y() << ")";
         return os;
     }
 
@@ -203,20 +210,58 @@ public:
         return Point(x_ + other.x(), y_ + other.y());
     }
     Point operator-(const Point& other) {
-        if (other.x() > x_) { throw Error("Substraction impossible on X: ", other.x(), " > ", x_); }
-        if (other.y() > y_) { throw Error("Substraction impossible on Y: ", other.y(), " > ", y_); }
+        if (other.x() > x_) {
+            throw Error("Substraction impossible on X: ", other.x(), " > ", x_);
+        }
+        if (other.y() > y_) {
+            throw Error("Substraction impossible on Y: ", other.y(), " > ", y_);
+        }
         return Point(x_ - other.x(), y_ - other.y());
     }
     Point operator*(double d) {
-        if (d<0) {throw Error("Mulitplication by negative scalar: ", d);}
+        if (d < 0) {
+            throw Error("Mulitplication by negative scalar: ", d);
+        }
         return Point(d * x_, d * y_);
+    }
+};
+
+enum class Type
+{
+    kMonster,
+    kHeros,
+    kOpponent
+};
+
+//! An entity on the play field
+class Entity {
+    uint id_;
+    Point p_;
+    Type type_;
+
+public:
+    Entity(uint id, const Point& p, Type type): id_(id), p_(p), type_(type) {}
+    virtual ~Entity() {}
+
+    uint id() const { return id_; }
+    Point p() const { return p_; }
+
+    double dist_to(const Point& p) const { return p_.dist_to(p); }
+
+    virtual void update(uint id, uint x, uint y) {
+        id_ = id;
+        p_ = Point(x, y);
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const Entity& e) {
+        os << "Entity(" << e.id() << ", " << e.p().x() << ", " << e.p().y() << ")";
+        return os;
     }
 };
 
 //! Return the distance between 2 Points.
 double dist(const Point& a, const Point& b) {
     return norm2(a.x() - b.x(), a.y() - b.y());
-
 }
 
 //! Print to stderr to debug
@@ -225,44 +270,51 @@ void debug(Args&&... args) {
     cerr << cat(args...) << endl;
 }
 
-int main()
-{
-    int base_x; // The corner of the map representing your base
+int main() {
+    int base_x;  // The corner of the map representing your base
     int base_y;
-    cin >> base_x >> base_y; cin.ignore();
-    int heroes_per_player; // Always 3
-    cin >> heroes_per_player; cin.ignore();
+    cin >> base_x >> base_y;
+    cin.ignore();
+    int heroes_per_player;  // Always 3
+    cin >> heroes_per_player;
+    cin.ignore();
 
     // game loop
     while (1) {
         for (int i = 0; i < 2; i++) {
-            int health; // Each player's base health
-            int mana; // Ignore in the first league; Spend ten mana to cast a spell
-            cin >> health >> mana; cin.ignore();
+            int health;  // Each player's base health
+            int mana;  // Ignore in the first league; Spend ten mana to cast a spell
+            cin >> health >> mana;
+            cin.ignore();
         }
-        int entity_count; // Amount of heros and monsters you can see
-        cin >> entity_count; cin.ignore();
+        int entity_count;  // Amount of heros and monsters you can see
+        cin >> entity_count;
+        cin.ignore();
         for (int i = 0; i < entity_count; i++) {
-            int id; // Unique identifier
-            int type; // 0=monster, 1=your hero, 2=opponent hero
-            int x; // Position of this entity
+            int id;  // Unique identifier
+            int type;  // 0=monster, 1=your hero, 2=opponent hero
+            int x;  // Position of this entity
             int y;
-            int shield_life; // Ignore for this league; Count down until shield spell fades
-            int is_controlled; // Ignore for this league; Equals 1 when this entity is under a control spell
-            int health; // Remaining health of this monster
-            int vx; // Trajectory of this monster
+            int shield_life;  // Ignore for this league; Count down until shield spell
+                              // fades
+            int is_controlled;  // Ignore for this league; Equals 1 when this entity is
+                                // under a control spell
+            int health;  // Remaining health of this monster
+            int vx;  // Trajectory of this monster
             int vy;
-            int near_base; // 0=monster with no target yet, 1=monster targeting a base
-            int threat_for; // Given this monster's trajectory, is it a threat to 1=your base, 2=your opponent's base, 0=neither
-            cin >> id >> type >> x >> y >> shield_life >> is_controlled >> health >> vx >> vy >> near_base >> threat_for; cin.ignore();
+            int near_base;  // 0=monster with no target yet, 1=monster targeting a base
+            int threat_for;  // Given this monster's trajectory, is it a threat to
+                             // 1=your base, 2=your opponent's base, 0=neither
+            cin >> id >> type >> x >> y >> shield_life >> is_controlled >> health >> vx
+                >> vy >> near_base >> threat_for;
+            cin.ignore();
         }
         for (int i = 0; i < heroes_per_player; i++) {
-
             // Write an action using cout. DON'T FORGET THE "<< endl"
             // To debug: cerr << "Debug messages..." << endl;
 
-
-            // In the first league: MOVE <x> <y> | WAIT; In later leagues: | SPELL <spellParams>;
+            // In the first league: MOVE <x> <y> | WAIT; In later leagues: | SPELL
+            // <spellParams>;
             cout << "WAIT" << endl;
         }
     }

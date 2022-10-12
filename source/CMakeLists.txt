@@ -49,10 +49,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_INSTALL_PREFIX}/bin)
 
 # ------------------------------------------------------------------------------------ #
 # Make relative paths absolute(needed later on)
-foreach(p LIB BIN CMAKE INCLUDE CMAKE)
-    set(var INSTALL_${p}_DIR)
-    if(NOT IS_ABSOLUTE "${${var}}")
-        set(${var} "${CMAKE_INSTALL_PREFIX}/${${var}}")
+foreach(p_ LIB BIN CMAKE INCLUDE CMAKE)
+    set(VAR INSTALL_${p_}_DIR)
+    if(NOT IS_ABSOLUTE "${${VAR}}")
+        set(${VAR} "${CMAKE_INSTALL_PREFIX}/${${VAR}}")
     endif()
 endforeach()
 
