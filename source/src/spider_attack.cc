@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -229,32 +230,112 @@ public:
 enum class Type
 {
     kMonster,
-    kHeros,
+    kHero,
     kOpponent
 };
 
 //! An entity on the play field
 class Entity {
-    uint id_;
+    const uint id_;
     Point p_;
-    Type type_;
+    const Type type_;
 
 public:
     Entity(uint id, const Point& p, Type type): id_(id), p_(p), type_(type) {}
     virtual ~Entity() {}
+    Entity(const Entity&) = default;
+    constexpr Entity(Entity&&) = default;
+    Entity& operator=(Entity&) = default;
+    Entity& operator=(Entity&&) = default;
 
     uint id() const { return id_; }
     Point p() const { return p_; }
+    Type type() const { return type_; }
 
     double dist_to(const Point& p) const { return p_.dist_to(p); }
 
-    virtual void update(uint id, uint x, uint y) {
-        id_ = id;
-        p_ = Point(x, y);
-    }
+    void update(uint x, uint y) { p_ = Point(x, y); }
 
     friend std::ostream& operator<<(std::ostream& os, const Entity& e) {
         os << "Entity(" << e.id() << ", " << e.p().x() << ", " << e.p().y() << ")";
+        return os;
+    }
+};
+
+class Hero: public Entity {
+public:
+    Hero(uint id, const Point& p): Entity(id, p, Type::kHero) {}
+
+    friend std::ostream& operator<<(std::ostream& os, const Hero& h) {
+        os << "Hero(" << h.id() << ", " << h.p().x() << ", " << h.p().y() << ")";
+        return os;
+    }
+};
+
+class Opponent: public Entity {
+public:
+    Opponent(uint id, const Point& p): Entity(id, p, Type::kOpponent) {}
+
+    friend std::ostream& operator<<(std::ostream& os, const Opponent& o) {
+        os << "Opponent(" << o.id() << ", " << o.p().x() << ", " << o.p().y() << ")";
+        return os;
+    }
+};
+
+enum class Threat
+{
+    kNone,
+    kBase,
+    kOpponent
+};
+
+class Monster: public Entity {
+    uint health_;
+    int vx_, vy_;
+    bool has_target_;
+    Threat threat_;
+
+public:
+    Monster(
+        uint id,
+        const Point& p,
+        uint health,
+        int vx,
+        int vy,
+        bool has_target,
+        int threat):
+        Entity(id, p, Type::kMonster),
+        health_(health),
+        vx_(vx),
+        vy_(vy),
+        has_target_(has_target),
+        threat_(Threat(threat)) {}
+    Monster(const Monster&) = default;
+    constexpr Monster(Monster&&) = default;
+    Monster& operator=(Monster&) = default;
+    Monster& operator=(Monster&&) = default;
+
+    uint health() const { return health_; }
+    int vx() const { return vx_; }
+    int vy() const { return vy_; }
+    bool has_target() const { return has_target_; }
+    Threat threat() const { return threat_; }
+
+    void update(
+        uint x, uint y, uint health, int vx, int vy, bool has_target, int threat) {
+        Entity::update(x, y);
+        health_ = health;
+        vx_ = vx;
+        vy_ = vy;
+        has_target_ = has_target;
+        threat_ = Threat(threat);
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const Monster& m) {
+        os << "Monster(" << m.id() << ", " << m.p().x() << ", " << m.p().y() << ", "
+           << m.health() << ", " << m.vx() << ", " << m.vy() << ", "
+           << (m.has_target() ? "targetting" : "wandering") << ", " << m.threat()
+           << ")";
         return os;
     }
 };
@@ -279,6 +360,9 @@ int main() {
     cin >> heroes_per_player;
     cin.ignore();
 
+    map<int, Hero> heroes;
+    map<int, Monster> monsters;
+
     // game loop
     while (1) {
         for (int i = 0; i < 2; i++) {
@@ -302,12 +386,26 @@ int main() {
             int health;  // Remaining health of this monster
             int vx;  // Trajectory of this monster
             int vy;
-            int near_base;  // 0=monster with no target yet, 1=monster targeting a base
-            int threat_for;  // Given this monster's trajectory, is it a threat to
-                             // 1=your base, 2=your opponent's base, 0=neither
+            int has_target;  // 0=monster with no target yet, 1=monster targeting a base
+            int threat;  // Given this monster's trajectory, is it a threat to
+                         // 1=your base, 2=your opponent's base, 0=neither
             cin >> id >> type >> x >> y >> shield_life >> is_controlled >> health >> vx
-                >> vy >> near_base >> threat_for;
+                >> vy >> has_target >> threat;
             cin.ignore();
+            if (type == 0) {  // monsters
+                if (not monsters.contains(id)) {
+                    monsters.emplace(std::pair<int&, Monster>(
+                        id, {id, {x, y}, health, vx, vy, has_target, threat}));
+                } else {
+                    monsters.at(id).update(x, y, health, vx, vy, has_target, threat);
+                }
+            } else if (type == 1) {  // heroes
+                if (not heroes.contains(id)) {
+                    heroes.emplace(std::pair<int&, Hero>(id, {id, {x, y}}));
+                } else {
+                    heroes.at(id).update(x, y);
+                }
+            }
         }
         for (int i = 0; i < heroes_per_player; i++) {
             // Write an action using cout. DON'T FORGET THE "<< endl"
