@@ -2,10 +2,10 @@ SHELL := /usr/bin/bash
 ROOT_DIR    := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 RELEASE_DIR := $(ROOT_DIR)/build/release/
 DEBUG_DIR   := $(ROOT_DIR)/build/debug/
-CONAN_DIR   := $(ROOT_DIR)/build/conan/
+#CONAN_DIR   := $(ROOT_DIR)/build/conan/
 INSTALL_DIR := $(ROOT_DIR)/install
 
-CMAKE := cmake $(ROOT_DIR)/source -DCONAN_DIR=$(CONAN_DIR) -DCONAN_CMAKE_SILENT_OUTPUT=1
+CMAKE := cmake $(ROOT_DIR)/source # -DCONAN_DIR=$(CONAN_DIR) -DCONAN_CMAKE_SILENT_OUTPUT=1
 FLAG := -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
 # Enable the debug of the build or the Makefile itself
@@ -37,28 +37,28 @@ debug: install_debug
 
 ########################################################################################
 # Release build
-.PHONY: install_dependencies.%
-install_dependencies.%:
-	echo "Installing the dependencies with conan in $* mode"
-	( conan install $(ROOT_DIR) -if $(CONAN_DIR) --build missing -s build_type=$* )
-
-$(CONAN_DIR)/conanbuildinfo.cmake: conanfile.txt
-	echo "Installing the dependencies with conan"
-	( conan install $(ROOT_DIR) -if $(CONAN_DIR) --build missing )
+# .PHONY: install_dependencies.%
+# install_dependencies.%:
+# 	echo "Installing the dependencies with conan in $* mode"
+# 	( conan install $(ROOT_DIR) -if $(CONAN_DIR) --build missing -s build_type=$* )
+#
+# $(CONAN_DIR)/conanbuildinfo.cmake: conanfile.txt
+# 	echo "Installing the dependencies with conan"
+# 	( conan install $(ROOT_DIR) -if $(CONAN_DIR) --build missing )
 
 .PHONY: generate
-generate: install_dependencies.Release
+generate: #install_dependencies.Release
 	echo "Creating directory $(RELEASE_DIR) and running cmake in Release mode"
 	mkdir -p $(RELEASE_DIR);
 	( cd $(RELEASE_DIR)$ ;  $(CMAKE) -DCMAKE_BUILD_TYPE=Release $(FLAG) ) || exit $$?;
 
-$(RELEASE_DIR)/CMakeCache.txt: $(CONAN_DIR)/conanbuildinfo.cmake
-	echo "Creating directory $(RELEASE_DIR) and running cmake in Release mode"
-	mkdir -p $(RELEASE_DIR);
-	( cd $(RELEASE_DIR)$ ;  $(CMAKE) -DCMAKE_BUILD_TYPE=Release $(FLAG) ) || exit $$?;
+# $(RELEASE_DIR)/CMakeCache.txt: $(CONAN_DIR)/conanbuildinfo.cmake
+# 	echo "Creating directory $(RELEASE_DIR) and running cmake in Release mode"
+# 	mkdir -p $(RELEASE_DIR);
+# 	( cd $(RELEASE_DIR)$ ;  $(CMAKE) -DCMAKE_BUILD_TYPE=Release $(FLAG) ) || exit $$?;
 
 .PHONY: build
-build: $(RELEASE_DIR)/CMakeCache.txt
+build: generate # $(RELEASE_DIR)/CMakeCache.txt
 	echo "Compiling in Release mode..."
 	( $(MAKE) -C $(RELEASE_DIR) all ) || exit $$?;
 
@@ -70,7 +70,7 @@ install: build
 ########################################################################################
 # Debug build
 .PHONY: generate_debug
-generate_debug: | install_dependencies.Debug
+generate_debug: #| install_dependencies.Debug
 	echo "Creating directory $(DEBUG_DIR) and running cmake in Debug mode"
 	mkdir -p $(DEBUG_DIR);
 	( cd $(DEBUG_DIR)$ ;  $(CMAKE) -DCMAKE_BUILD_TYPE=Debug $(FLAG)) || exit $$?;
@@ -89,7 +89,7 @@ install_debug: build_debug
 
 
 .PHONY: clean
-clean: clean_conan clean_install clean_stm32
+clean: clean_install # clean_conan
 	if [ -d  $(RELEASE_DIR) ]; \
 	then \
 		echo "Cleaning compiled files"; \
@@ -101,7 +101,7 @@ clean: clean_conan clean_install clean_stm32
 	fi;
 
 .PHONY: clean_debug
-clean_debug: clean_conan clean_install
+clean_debug: clean_install #clean_conan
 	if [ -d  $(DEBUG_DIR) ]; \
 	then \
 		echo "Cleaning compiled files"; \
@@ -117,10 +117,10 @@ clean_install:
 	echo "Cleaning installed binaries and libraries"
 	rm -rf $(INSTALL_DIR)/
 
-.PHONY: clean_conan
-clean_conan:
-	echo "Cleaning Conan's dependency installation files"
-	rm -rf $(CONAN_DIR)
+# .PHONY: clean_conan
+# clean_conan:
+# 	echo "Cleaning Conan's dependency installation files"
+# 	rm -rf $(CONAN_DIR)
 
 ########################################################################################
 # Help
@@ -130,18 +130,18 @@ help:
 	echo ".. all (the default if no target is provided)"
 	echo ".. force"
 	echo ".. debug"
-	echo ".. install_dependencies.Release"
+#	echo ".. install_dependencies.Release"
 	echo ".. generate"
 	echo ".. build"
 	echo ".. install"
-	echo ".. install_dependencies.Debug"
+#	echo ".. install_dependencies.Debug"
 	echo ".. generate_debug"
 	echo ".. build_debug"
 	echo ".. install_debug"
 	echo ".. clean"
 	echo ".. clean_debug"
 	echo ".. clean_install"
-	echo ".. clean_conan"
+#	echo ".. clean_conan"
 	if [ -d  $(RELEASE_DIR) ]; \
 	then \
 		echo; echo "Targets of the CMake generated Makefile"; \
@@ -150,7 +150,7 @@ help:
 
 ########################################################################################
 # Black magic: redirect all unknown rule to the CMake generated Makefile
-conanfile.txt:;
+#conanfile.txt:;
 Makefile:;
 %/Makefile:;
 .PHONY: %
