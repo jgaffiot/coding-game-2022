@@ -411,10 +411,12 @@ Point standby(uint index, bool top_left) {
     }
 }
 
+bool top_left{true};
+
 struct {
     bool operator()(const Monster& a, const Monster& b) {
-        auto d_a = a.dist_to(kBases[0]);
-        auto d_b = b.dist_to(kBases[0]);
+        auto d_a = a.dist_to(kBases[top_left ? 0 : 1]);
+        auto d_b = b.dist_to(kBases[top_left ? 0 : 1]);
         return d_a > d_b;
     }
 } cmpMonster;
@@ -428,7 +430,7 @@ int main() {
     cin >> heroes_per_player;
     cin.ignore();
 
-    bool top_left = base_x == 0 ? true : false;
+    top_left = base_x == 0 ? true : false;
 
     map<int, Hero> heroes;
     map<int, Monster> monsters;
