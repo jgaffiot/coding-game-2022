@@ -1,6 +1,8 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <string>
@@ -9,6 +11,35 @@
 using namespace std;
 
 using uint = unsigned int;
+
+// some mathematical constants
+constexpr double Pi() {
+    return 3.14159265358979323846264338327950288419716939937510;
+}  // 50 digits
+constexpr double TwoPi() {
+    return 2.0 * Pi();
+}
+constexpr double PiSq() {
+    return Pi() * Pi();
+}
+constexpr double PiOver2() {
+    return Pi() / 2.0;
+}
+constexpr double PiOver4() {
+    return Pi() / 4.0;
+}
+constexpr double InvPi() {
+    return 1.0 / Pi();
+}
+constexpr double RadToDeg() {
+    return 180.0 / Pi();
+}
+constexpr double DegToRad() {
+    return Pi() / 180.0;
+}
+constexpr double Sqrt2() {
+    return 1.4142135623730950488016887242097;
+}
 
 // floating point comparison
 template<
@@ -162,19 +193,28 @@ private:
 };
 
 // Some constants
-constexpr uint HERO_MOV{800};  // hero maximal movement per turn
-constexpr uint MSTR_MOV{400};  // monster maximal movement per turn
-constexpr uint DMG{2};  // damages per turn
-constexpr uint R_DMG{800};  // damage radius
-constexpr uint X_MAX{17630};
-constexpr uint Y_MAX{9000};
+constexpr uint HERO_MOV{800u};  // hero maximal movement per turn
+constexpr uint MSTR_MOV{400u};  // monster maximal movement per turn
+constexpr uint DMG{2u};  // damages per turn
+constexpr uint R_DMG{800u};  // damage radius
+constexpr uint R_BASE{300u};  // base radius
+constexpr uint X_MIN{0u};
+constexpr uint Y_MIN{0u};
+constexpr uint X_MAX{17630u};
+constexpr uint Y_MAX{9000u};
 
 //! A 2 dimension point.
 class Point {
     uint x_, y_;
 
 public:
-    Point(uint x, uint y): x_(x), y_(y) {}
+    Point(): x_(0u), y_(0u) {}
+    Point(uint x, uint y): x_(x), y_(y) {
+        if (x > X_MAX or y > Y_MAX) {
+            throw Error(
+                "Point out of bounds: ", x, " > ", X_MAX, " or ", y, " > ", Y_MAX);
+        }
+    }
 
     //! Create a Point from polar coordinates.
     static Point from_polar(double r, double theta) {
@@ -211,20 +251,9 @@ public:
         return Point(x_ + other.x(), y_ + other.y());
     }
     Point operator-(const Point& other) {
-        if (other.x() > x_) {
-            throw Error("Substraction impossible on X: ", other.x(), " > ", x_);
-        }
-        if (other.y() > y_) {
-            throw Error("Substraction impossible on Y: ", other.y(), " > ", y_);
-        }
         return Point(x_ - other.x(), y_ - other.y());
     }
-    Point operator*(double d) {
-        if (d < 0) {
-            throw Error("Mulitplication by negative scalar: ", d);
-        }
-        return Point(d * x_, d * y_);
-    }
+    Point operator*(uint d) { return Point(d * x_, d * y_); }
 };
 
 enum class Type
@@ -233,6 +262,8 @@ enum class Type
     kHero,
     kOpponent
 };
+
+static const array<Point, 2> kBases{Point{X_MIN, Y_MIN}, Point{X_MAX, Y_MAX}};
 
 //! An entity on the play field
 class Entity {
@@ -245,8 +276,6 @@ public:
     virtual ~Entity() {}
     Entity(const Entity&) = default;
     constexpr Entity(Entity&&) = default;
-    Entity& operator=(Entity&) = default;
-    Entity& operator=(Entity&&) = default;
 
     uint id() const { return id_; }
     Point p() const { return p_; }
@@ -265,6 +294,11 @@ public:
 class Hero: public Entity {
 public:
     Hero(uint id, const Point& p): Entity(id, p, Type::kHero) {}
+    Hero(int id, int x, int y):
+        Entity(
+            static_cast<uint>(id),
+            {static_cast<uint>(x), static_cast<uint>(y)},
+            Type::kHero) {}
 
     friend std::ostream& operator<<(std::ostream& os, const Hero& h) {
         os << "Hero(" << h.id() << ", " << h.p().x() << ", " << h.p().y() << ")";
@@ -310,10 +344,19 @@ public:
         vy_(vy),
         has_target_(has_target),
         threat_(Threat(threat)) {}
+    Monster(
+        int id, int x, int y, int health, int vx, int vy, int has_target, int threat):
+        Entity(
+            static_cast<uint>(id),
+            {static_cast<uint>(x), static_cast<uint>(y)},
+            Type::kMonster),
+        health_(static_cast<uint>(health)),
+        vx_(vx),
+        vy_(vy),
+        has_target_(static_cast<bool>(has_target)),
+        threat_(Threat(threat)) {}
     Monster(const Monster&) = default;
     constexpr Monster(Monster&&) = default;
-    Monster& operator=(Monster&) = default;
-    Monster& operator=(Monster&&) = default;
 
     uint health() const { return health_; }
     int vx() const { return vx_; }
@@ -351,6 +394,31 @@ void debug(Args&&... args) {
     cerr << cat(args...) << endl;
 }
 
+Point standby(uint index, bool top_left) {
+    const int sign = top_left ? 1 : -1;
+    const Point home = top_left ? Point(X_MIN, Y_MIN) : Point(X_MAX, Y_MAX);
+    constexpr uint a = static_cast<uint>(R_DMG * (1 + Sqrt2()));
+    constexpr uint b = static_cast<uint>(R_DMG * (1. + 2. * cos(Pi() / 12.)));
+
+    if (index == 0u) {
+        return Point(home.x() + sign * b, home.y() + sign * b);
+    } else if (index == 1u) {
+        return Point(home.x() + sign * R_DMG, home.y() + sign * a);
+    } else if (index == 2u) {
+        return Point(home.x() + sign * a, home.y() + sign * R_DMG);
+    } else {
+        throw Error("Incorrect hero index (>3): ", index);
+    }
+}
+
+struct {
+    bool operator()(const Monster& a, const Monster& b) {
+        auto d_a = a.dist_to(kBases[0]);
+        auto d_b = b.dist_to(kBases[0]);
+        return d_a > d_b;
+    }
+} cmpMonster;
+
 int main() {
     int base_x;  // The corner of the map representing your base
     int base_y;
@@ -360,11 +428,16 @@ int main() {
     cin >> heroes_per_player;
     cin.ignore();
 
+    bool top_left = base_x == 0 ? true : false;
+
     map<int, Hero> heroes;
     map<int, Monster> monsters;
+    vector<reference_wrapper<Monster>> dangers;
 
     // game loop
     while (1) {
+        monsters.clear();
+        dangers.clear();
         for (int i = 0; i < 2; i++) {
             int health;  // Each player's base health
             int mana;  // Ignore in the first league; Spend ten mana to cast a spell
@@ -393,27 +466,36 @@ int main() {
                 >> vy >> has_target >> threat;
             cin.ignore();
             if (type == 0) {  // monsters
-                if (not monsters.contains(id)) {
-                    monsters.emplace(pair<int&, Monster>(
-                        id, {id, {x, y}, health, vx, vy, has_target, threat}));
-                } else {
-                    monsters.at(id).update(x, y, health, vx, vy, has_target, threat);
-                }
+                monsters.emplace(pair<int&, Monster>(
+                    id, {id, x, y, health, vx, vy, has_target, threat}));
             } else if (type == 1) {  // heroes
-                if (not heroes.contains(id)) {
-                    heroes.emplace(pair<int&, Hero>(id, {id, {x, y}}));
+                if (not heroes.count(id)) {
+                    heroes.emplace(pair<int&, Hero>(id, {id, x, y}));
                 } else {
                     heroes.at(id).update(x, y);
                 }
             }
         }
+        for (auto& [id, monster] : monsters) {
+            if (monster.threat() == Threat::kBase) {
+                dangers.emplace_back(ref(monster));
+            }
+        }
+        sort(dangers.begin(), dangers.end(), cmpMonster);
         for (int i = 0; i < heroes_per_player; i++) {
             // Write an action using cout. DON'T FORGET THE "<< endl"
             // To debug: cerr << "Debug messages..." << endl;
+            Point dest;
+            if (dangers.empty()) {
+                dest = standby(i, top_left);
+            } else {
+                dest = dangers.back().get().p();
+                dangers.pop_back();
+            }
 
             // In the first league: MOVE <x> <y> | WAIT; In later leagues: | SPELL
             // <spellParams>;
-            cout << "WAIT" << endl;
+            cout << "MOVE " << dest.x() << " " << dest.y() << endl;
         }
     }
 }

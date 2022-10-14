@@ -10,7 +10,7 @@ set(REPOSITORY_DIR ${PROJECT_SOURCE_DIR}/../)
 
 # ------------------------------------------------------------------------------------ #
 # Set default C++ standard to C++17
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 # set(CMAKE_CXX_STANDARD_REQUIRED True)
 # Set warnings
 set(CMAKE_CXX_FLAGS
