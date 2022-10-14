@@ -3,4 +3,4 @@
 ## Introduction
 
 - team: The Gathering
-- language: C++ 2020
+- language: C++ 17
