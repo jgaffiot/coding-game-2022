@@ -198,10 +198,96 @@ constexpr uint MSTR_MOV{400u};  // monster maximal movement per turn
 constexpr uint DMG{2u};  // damages per turn
 constexpr uint R_DMG{800u};  // damage radius
 constexpr uint R_BASE{300u};  // base radius
+constexpr uint R_FOG_BASE{6000u};  // base radius
+constexpr uint R_FOG_HERO{2200u};  // base radius
 constexpr uint X_MIN{0u};
 constexpr uint Y_MIN{0u};
 constexpr uint X_MAX{17630u};
 constexpr uint Y_MAX{9000u};
+
+//! A 2-dimension mathematical vector to represent speed
+class Vector2 {
+public:
+    Vector2() {}
+    Vector2(double x, double y): v({x, y}) {}
+
+    //! Create a Vector2 from polar coordinates.
+    static Vector2 from_polar(double r, double theta) {
+        return Vector2(abs(r) * cos(theta), abs(r) * sin(theta));
+    }
+
+    Vector2(const Vector2&) = default;
+    Vector2& operator=(const Vector2&) = default;
+
+    double operator[](std::size_t i) const { return v[i]; }
+    double operator()(std::size_t i) const {
+        if (i < 2) {
+            return v[i];
+        }
+        throw Error("Vector2::operator(): index too high: ", i, " > 1");
+    }
+    double at(std::size_t i) const { return v.at(i); }
+    double x() const { return v[0]; }
+    double y() const { return v[1]; }
+
+    Vector2& unit() {
+        const double norm = norm2(v[0], v[1]);
+        v[0] /= norm;
+        v[1] /= norm;
+        return *this;
+    }
+    double r() const { return norm2(v[0], v[1]); }  //! Modulus
+    double theta() const { return atan2(v[0], v[1]); }  //! Argument
+
+    void set_x(double x) { v[0] = x; }
+    void set_y(double y) { v[1] = y; }
+    void set(double x, double y) {
+        v[0] = x;
+        v[1] = y;
+    }
+
+    void set_r_theta(double r, double theta) {
+        double amag = abs(r);
+        v[0] = amag * cos(theta);
+        v[1] = amag * sin(theta);
+    }
+    Vector2& rotate(double phi) {
+        const double sinphi = sin(phi);
+        const double cosphi = cos(phi);
+        const double t = v[0] * cosphi - v[1] * sinphi;
+        v[1] = v[1] * cosphi + v[0] * sinphi;
+        v[0] = t;
+        return *this;
+    }
+    friend Vector2 operator+(const Vector2& a, const Vector2& b) {
+        return Vector2(a.x() + b.x(), a.y() + b.y());
+    }
+    friend Vector2 operator-(const Vector2& a, const Vector2& b) {
+        return Vector2(a.x() - b.x(), a.y() - b.y());
+    }
+    friend double operator*(const Vector2& a, const Vector2& b) {
+        return a.x() * b.x() + a.y() * b.y();
+    }
+    friend Vector2 operator*(const Vector2& v, double d) {
+        return Vector2(d * v.x(), d * v.y());
+    }
+    friend Vector2 operator*(double d, const Vector2& v) {
+        return Vector2(d * v.x(), d * v.y());
+    }
+    friend Vector2 operator/(const Vector2& v, double d) {
+        return Vector2(v.x() / d, v.y() / d);
+    }
+    friend bool operator==(const Vector2& a, const Vector2& b) {
+        return equals(a.x(), b.x()) and equals(a.y(), b.y());
+    }
+    friend std::ostream& operator<<(std::ostream& os, const Vector2& v) {
+        os << "(" << v[0] << "," << v[1] << ")";
+        return os;
+    }
+
+private:
+    std::array<double, 2> v = {{}};
+};
 
 //! A 2 dimension point.
 class Point {
@@ -218,7 +304,7 @@ public:
 
     //! Create a Point from polar coordinates.
     static Point from_polar(double r, double theta) {
-        return Point(r * cos(theta), r * sin(theta));
+        return Point(abs(r) * cos(theta), abs(r) * sin(theta));
     }
 
     uint x() const { return x_; }
@@ -228,13 +314,22 @@ public:
     double r() const { return norm2(x_, y_); }  //! Modulus
     double theta() const { return atan2(x_, y_); }  //! Argument
     //! Distance to another point
-    double dist_to(const Point& p) const { return norm2(x_ - p.x(), y_ - p.y()); }
+    double dist_to(const Point& p) const {
+        return norm2(
+            x_ > p.x() ? x_ - p.x() : p.x() - x_, y_ > p.y() ? y_ - p.y() : p.y() - y_);
+    }
 
     //! Advance the point from the given dist.
-    void advance(uint dist) {
+    void advance(int dist) {
         const double t = theta();
         x_ += dist * cos(t);
         y_ += dist * sin(t);
+        x_ = min(max(0u, x_), X_MAX);
+        y_ = min(max(0u, y_), Y_MAX);
+    }
+    void advance(const Vector2& speed) {
+        x_ += speed.x();
+        y_ += speed.y();
         x_ = min(max(0u, x_), X_MAX);
         y_ = min(max(0u, y_), Y_MAX);
     }
@@ -244,11 +339,12 @@ public:
         return os;
     }
 
-    bool operator==(const Point& other) {
-        return equals(x_, other.x()) and equals(y_, other.y());
-    }
+    bool operator==(const Point& other) { return x_ == other.x() and y_ == other.y(); }
     Point operator+(const Point& other) {
         return Point(x_ + other.x(), y_ + other.y());
+    }
+    Point operator+(const Vector2& speed) {
+        return Point(x_ + speed.x(), y_ + speed.y());
     }
     Point operator-(const Point& other) {
         return Point(x_ - other.x(), y_ - other.y());
@@ -267,10 +363,6 @@ static const array<Point, 2> kBases{Point{X_MIN, Y_MIN}, Point{X_MAX, Y_MAX}};
 
 //! An entity on the play field
 class Entity {
-    const uint id_;
-    Point p_;
-    const Type type_;
-
 public:
     Entity(uint id, const Point& p, Type type): id_(id), p_(p), type_(type) {}
     virtual ~Entity() {}
@@ -289,6 +381,11 @@ public:
         os << "Entity(" << e.id() << ", " << e.p().x() << ", " << e.p().y() << ")";
         return os;
     }
+
+private:
+    const uint id_;
+    Point p_;
+    const Type type_;
 };
 
 class Hero: public Entity {
@@ -324,11 +421,6 @@ enum class Threat
 };
 
 class Monster: public Entity {
-    uint health_;
-    int vx_, vy_;
-    bool has_target_;
-    Threat threat_;
-
 public:
     Monster(
         uint id,
@@ -340,8 +432,7 @@ public:
         int threat):
         Entity(id, p, Type::kMonster),
         health_(health),
-        vx_(vx),
-        vy_(vy),
+        v_(vx, vy),
         has_target_(has_target),
         threat_(Threat(threat)) {}
     Monster(
@@ -351,16 +442,14 @@ public:
             {static_cast<uint>(x), static_cast<uint>(y)},
             Type::kMonster),
         health_(static_cast<uint>(health)),
-        vx_(vx),
-        vy_(vy),
+        v_(vx, vy),
         has_target_(static_cast<bool>(has_target)),
         threat_(Threat(threat)) {}
     Monster(const Monster&) = default;
     constexpr Monster(Monster&&) = default;
 
     uint health() const { return health_; }
-    int vx() const { return vx_; }
-    int vy() const { return vy_; }
+    Vector2 v() const { return v_; }
     bool has_target() const { return has_target_; }
     Threat threat() const { return threat_; }
 
@@ -368,24 +457,31 @@ public:
         uint x, uint y, uint health, int vx, int vy, bool has_target, int threat) {
         Entity::update(x, y);
         health_ = health;
-        vx_ = vx;
-        vy_ = vy;
+        v_ = Vector2(vx, vy);
         has_target_ = has_target;
         threat_ = Threat(threat);
     }
 
     friend std::ostream& operator<<(std::ostream& os, const Monster& m) {
         os << "Monster(" << m.id() << ", " << m.p().x() << ", " << m.p().y() << ", "
-           << m.health() << ", " << m.vx() << ", " << m.vy() << ", "
+           << m.health() << ", " << m.v() << ", "
            << (m.has_target() ? "targetting" : "wandering") << ", " << m.threat()
            << ")";
         return os;
     }
+
+private:
+    uint health_;
+    Vector2 v_;
+    bool has_target_;
+    Threat threat_;
 };
 
 //! Return the distance between 2 Points.
-double dist(const Point& a, const Point& b) {
-    return norm2(a.x() - b.x(), a.y() - b.y());
+uint dist(const Point& a, const Point& b) {
+    return static_cast<uint>(norm2(
+        a.x() > b.x() ? a.x() - b.x() : b.x() - a.x(),
+        a.y() > b.y() ? a.y() - b.y() : b.y() - a.y()));
 }
 
 //! Print to stderr to debug
@@ -394,24 +490,27 @@ void debug(Args&&... args) {
     cerr << cat(args...) << endl;
 }
 
-Point standby(uint index, bool top_left) {
-    const int sign = top_left ? 1 : -1;
+// global variable to indicate if our base is top left (else bottom rifght)
+bool top_left{true};
+int sign{0};
+
+// return a default position for our heroes
+Point standby(uint index) {
+    constexpr uint r = R_FOG_HERO;
+    constexpr uint a = static_cast<uint>(r * (1 + Sqrt2()));
+    constexpr uint b = static_cast<uint>(r * (1. + 2. * cos(Pi() / 12.)));
     const Point home = top_left ? Point(X_MIN, Y_MIN) : Point(X_MAX, Y_MAX);
-    constexpr uint a = static_cast<uint>(R_DMG * (1 + Sqrt2()));
-    constexpr uint b = static_cast<uint>(R_DMG * (1. + 2. * cos(Pi() / 12.)));
 
     if (index == 0u) {
         return Point(home.x() + sign * b, home.y() + sign * b);
     } else if (index == 1u) {
-        return Point(home.x() + sign * R_DMG, home.y() + sign * a);
+        return Point(home.x() + sign * r, home.y() + sign * a);
     } else if (index == 2u) {
-        return Point(home.x() + sign * a, home.y() + sign * R_DMG);
+        return Point(home.x() + sign * a, home.y() + sign * r);
     } else {
         throw Error("Incorrect hero index (>3): ", index);
     }
 }
-
-bool top_left{true};
 
 struct {
     bool operator()(const Monster& a, const Monster& b) {
@@ -431,10 +530,13 @@ int main() {
     cin.ignore();
 
     top_left = base_x == 0 ? true : false;
+    sign = top_left ? 1 : -1;
+    const Point home = top_left ? Point(X_MIN, Y_MIN) : Point(X_MAX, Y_MAX);
 
     map<int, Hero> heroes;
     map<int, Monster> monsters;
     vector<reference_wrapper<Monster>> dangers;
+    array<Point, 3> hero_orders{};
 
     // game loop
     while (1) {
@@ -478,22 +580,50 @@ int main() {
                 }
             }
         }
+        // list monsters targeting our bases
+        // TODO(JG): priorize monster with target
         for (auto& [id, monster] : monsters) {
             if (monster.threat() == Threat::kBase) {
                 dangers.emplace_back(ref(monster));
             }
         }
+
+        if (dangers.empty()) {
+            for (int i = 0; i < heroes_per_player; i++) {
+                Point dest = standby(i);
+                cout << "MOVE " << dest.x() << " " << dest.y() << endl;
+            }
+            continue;
+        }
+
+        // ensure all heroes have a target
+        while (dangers.size() < static_cast<size_t>(heroes_per_player)) {
+            dangers.push_back(dangers.back());
+        }
+        // priorize target by distance to the base
         sort(dangers.begin(), dangers.end(), cmpMonster);
+        for (int i = 0; i < heroes_per_player; i++) {
+            int closest{-1};
+            uint min_dist = X_MAX + Y_MAX;
+            for (const auto& [id, hero] : heroes) {
+                uint d = dist(hero.p(), dangers.at(i).get().p());
+                if (d < min_dist) {
+                    min_dist = d;
+                    closest = id;
+                }
+            }
+
+            debug("Monster ", i, ": ", dangers.at(i).get(), " => ", heroes.at(closest));
+            heroes.erase(closest);
+            Point dest = dangers.back().get().p();
+            dest.advance(-sign * MSTR_MOV);
+            hero_orders[i] = dest;
+        }
+
         for (int i = 0; i < heroes_per_player; i++) {
             // Write an action using cout. DON'T FORGET THE "<< endl"
             // To debug: cerr << "Debug messages..." << endl;
-            Point dest;
-            if (dangers.empty()) {
-                dest = standby(i, top_left);
-            } else {
-                dest = dangers.back().get().p();
-                dangers.pop_back();
-            }
+            Point dest = hero_orders[i];
 
             // In the first league: MOVE <x> <y> | WAIT; In later leagues: | SPELL
             // <spellParams>;
