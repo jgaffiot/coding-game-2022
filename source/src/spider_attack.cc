@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <deque>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -193,17 +194,21 @@ private:
 };
 
 // Some constants
+constexpr uint X_MIN{0u};
+constexpr uint Y_MIN{0u};
+constexpr uint X_MAX{17630u};
+constexpr uint Y_MAX{9000u};
+constexpr uint NB_HEROES{3u};
 constexpr uint HERO_MOV{800u};  // hero maximal movement per turn
 constexpr uint MSTR_MOV{400u};  // monster maximal movement per turn
 constexpr uint DMG{2u};  // damages per turn
 constexpr uint R_DMG{800u};  // damage radius
 constexpr uint R_BASE{300u};  // base radius
-constexpr uint R_FOG_BASE{6000u};  // base radius
-constexpr uint R_FOG_HERO{2200u};  // base radius
-constexpr uint X_MIN{0u};
-constexpr uint Y_MIN{0u};
-constexpr uint X_MAX{17630u};
-constexpr uint Y_MAX{9000u};
+constexpr uint R_FOG_BASE{6000u};  // base fog radius
+constexpr uint R_FOG_HERO{2200u};  // hero fog radius
+constexpr uint R_WIND{1280u};  // wind spell effect radius
+constexpr uint WIND_MOV{2200u};  // wind spell movement
+constexpr uint WIND_MANA{10u};
 
 //! A 2-dimension mathematical vector to represent speed
 class Vector2 {
@@ -333,6 +338,13 @@ public:
         x_ = min(max(0u, x_), X_MAX);
         y_ = min(max(0u, y_), Y_MAX);
     }
+    void rotate(double phi) {
+        const double sinphi = sin(phi);
+        const double cosphi = cos(phi);
+        const double t = x_ * cosphi - y_ * sinphi;
+        y_ = y_ * cosphi + x_ * sinphi;
+        x_ = t;
+    }
 
     friend std::ostream& operator<<(std::ostream& os, const Point& p) {
         os << "Point(" << p.x() << ", " << p.y() << ")";
@@ -359,7 +371,16 @@ enum class Type
     kOpponent
 };
 
-static const array<Point, 2> kBases{Point{X_MIN, Y_MIN}, Point{X_MAX, Y_MAX}};
+// global variable to indicate if our base is top left (else bottom rifght)
+static const array<Point, 2> kBases{Point{X_MAX, Y_MAX}, Point{X_MIN, Y_MIN}};
+bool top_left{true};
+int sign{0};
+const Point& Home() {
+    return kBases[top_left];
+}
+const Point& Opponent() {
+    return kBases[not static_cast<bool>(top_left)];
+}
 
 //! An entity on the play field
 class Entity {
@@ -368,6 +389,8 @@ public:
     virtual ~Entity() {}
     Entity(const Entity&) = default;
     constexpr Entity(Entity&&) = default;
+    Entity& operator=(const Entity&) = default;
+    Entity& operator=(Entity&&) = default;
 
     uint id() const { return id_; }
     Point p() const { return p_; }
@@ -383,34 +406,9 @@ public:
     }
 
 private:
-    const uint id_;
+    uint id_;
     Point p_;
-    const Type type_;
-};
-
-class Hero: public Entity {
-public:
-    Hero(uint id, const Point& p): Entity(id, p, Type::kHero) {}
-    Hero(int id, int x, int y):
-        Entity(
-            static_cast<uint>(id),
-            {static_cast<uint>(x), static_cast<uint>(y)},
-            Type::kHero) {}
-
-    friend std::ostream& operator<<(std::ostream& os, const Hero& h) {
-        os << "Hero(" << h.id() << ", " << h.p().x() << ", " << h.p().y() << ")";
-        return os;
-    }
-};
-
-class Opponent: public Entity {
-public:
-    Opponent(uint id, const Point& p): Entity(id, p, Type::kOpponent) {}
-
-    friend std::ostream& operator<<(std::ostream& os, const Opponent& o) {
-        os << "Opponent(" << o.id() << ", " << o.p().x() << ", " << o.p().y() << ")";
-        return os;
-    }
+    Type type_;
 };
 
 enum class Threat
@@ -447,6 +445,8 @@ public:
         threat_(Threat(threat)) {}
     Monster(const Monster&) = default;
     constexpr Monster(Monster&&) = default;
+    Monster& operator=(const Monster&) = default;
+    Monster& operator=(Monster&&) = default;
 
     uint health() const { return health_; }
     Vector2 v() const { return v_; }
@@ -470,11 +470,129 @@ public:
         return os;
     }
 
+    static struct {
+        bool operator()(const Monster& a, const Monster& b) {
+            auto d_a = a.dist_to(Home());
+            auto d_b = b.dist_to(Home());
+            return d_a > d_b;
+        }
+    } cmp;
+
 private:
     uint health_;
     Vector2 v_;
     bool has_target_;
     Threat threat_;
+};
+
+class Hero: public Entity {
+public:
+    Hero(uint id, const Point& p): Entity(id, p, Type::kHero) {}
+    Hero(int id, int x, int y):
+        Entity(
+            static_cast<uint>(id),
+            {static_cast<uint>(x), static_cast<uint>(y)},
+            Type::kHero) {}
+
+    void update(uint x, uint y) {
+        prev_ = p();
+        Entity::update(x, y);
+        is_done_ = false;
+    }
+
+    void done() { is_done_ = true; }
+    bool is_done() const { return is_done_; }
+
+    Point Scout() {
+        if (id() == 0) {
+            return Standby();
+        }
+
+        double deviation = Pi() / 3.;
+        if (id() == 2) {
+            deviation *= -1.;
+        }
+
+        Point dest;
+        double dist = dist_to(Home());
+        if (dist > 15000) {
+            dest = Home();
+        } else if (dist > R_FOG_BASE + R_FOG_HERO) {
+            dest = dest_;
+        } else {
+            dest = Opponent();
+            dest.rotate(deviation);
+        }
+        dest_ = dest;
+        return dest;
+    }
+
+    uint get_nb_target(const map<int, Monster>& monsters) {
+        uint nb{0u};
+        for (const auto& [id, monster] : monsters) {
+            if (dist_to(monster.p()) < R_WIND) {
+                nb++;
+            }
+        }
+        return nb;
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const Hero& h) {
+        os << "Hero(" << h.id() << ", " << h.p().x() << ", " << h.p().y() << ")";
+        return os;
+    }
+
+    //! return a default position for our heroes
+    static Point Standby() {
+        return Point(Home().x() + sign * R_FOG_HERO, Home().y() + sign * R_FOG_HERO);
+    }
+
+private:
+    bool is_done_{false};
+    Point prev_{Home()};
+    Point dest_{Home()};
+};
+
+class Opponent: public Entity {
+public:
+    Opponent(uint id, const Point& p): Entity(id, p, Type::kOpponent) {}
+
+    friend std::ostream& operator<<(std::ostream& os, const Opponent& o) {
+        os << "Opponent(" << o.id() << ", " << o.p().x() << ", " << o.p().y() << ")";
+        return os;
+    }
+};
+
+enum class Action
+{
+    kMove,
+    kWind
+};
+
+class Order {
+private:
+    Action action_;
+    Point dest_;
+
+public:
+    Order(): action_(Action::kMove), dest_(Hero::Standby()) {}
+    Order(Action action, const Point& dest): action_(action), dest_(dest) {}
+
+    Action action() const { return action_; }
+    const Point& dest() const { return dest_; }
+
+    friend ostream& operator<<(ostream& os, const Order& order) {
+        switch (order.action()) {
+            case Action::kMove:
+                os << "MOVE ";
+                break;
+            case Action::kWind:
+                os << "WIND ";
+                break;
+        }
+        os << order.dest().x() << " " << order.dest().y();
+        return os;
+    }
 };
 
 //! Return the distance between 2 Points.
@@ -490,35 +608,103 @@ void debug(Args&&... args) {
     cerr << cat(args...) << endl;
 }
 
-// global variable to indicate if our base is top left (else bottom rifght)
-bool top_left{true};
-int sign{0};
+class Solver {
+public:
+    int health;  // base health
+    int mana;  // Spend ten mana to cast a spell
+    map<int, Hero> heroes;
+    map<int, Monster> monsters;
+    deque<int> dangers, others;
+    array<Order, 3> hero_orders{};
 
-// return a default position for our heroes
-Point standby(uint index) {
-    constexpr uint r = R_FOG_HERO;
-    constexpr uint a = static_cast<uint>(r * (1 + Sqrt2()));
-    constexpr uint b = static_cast<uint>(r * (1. + 2. * cos(Pi() / 12.)));
-    const Point home = top_left ? Point(X_MIN, Y_MIN) : Point(X_MAX, Y_MAX);
-
-    if (index == 0u) {
-        return Point(home.x() + sign * b, home.y() + sign * b);
-    } else if (index == 1u) {
-        return Point(home.x() + sign * r, home.y() + sign * a);
-    } else if (index == 2u) {
-        return Point(home.x() + sign * a, home.y() + sign * r);
-    } else {
-        throw Error("Incorrect hero index (>3): ", index);
+    void clear() {
+        monsters.clear();
+        dangers.clear();
     }
-}
 
-struct {
-    bool operator()(const Monster& a, const Monster& b) {
-        auto d_a = a.dist_to(kBases[top_left ? 0 : 1]);
-        auto d_b = b.dist_to(kBases[top_left ? 0 : 1]);
-        return d_a > d_b;
+    uint get_closest_hero(const Monster& monster) const {
+        double min_dist = numeric_limits<double>::max();
+        int closest = NB_HEROES + 1;
+        for (uint i = 0; i < NB_HEROES; i++) {
+            double dist = monster.dist_to(heroes.at(i).p());
+            if (dist < min_dist) {
+                min_dist = dist;
+                closest = i;
+            }
+        }
+        return closest;
     }
-} cmpMonster;
+
+    void compute_heroes_action() {
+        // list monsters targeting our bases
+        for (auto& [id, monster] : monsters) {
+            if (monster.threat() == Threat::kBase) {
+                dangers.push_back(id);
+            } else {
+                others.push_back(id);
+            }
+        }
+
+        // sort monsters by distance to base
+        // TODO(JG): priorize monster with target ?
+        sort(dangers.begin(), dangers.end(), [this](int a, int b) -> bool {
+            return Monster::cmp(monsters.at(a), monsters.at(b));
+        });
+        sort(others.begin(), others.end(), [this](int a, int b) -> bool {
+            return Monster::cmp(monsters.at(a), monsters.at(b));
+        });
+
+        // push away monster if too close of the base
+        if (monsters.at(dangers.front()).dist_to(Home()) < 2 * MSTR_MOV
+            and mana > WIND_MANA) {
+            uint closest = get_closest_hero(monsters.at(dangers.front()));
+            hero_orders[closest] = Order(Action::kWind, Home());
+            heroes.at(closest).done();
+            monsters.erase(dangers.front());
+            dangers.pop_front();
+        }
+
+        // action for heroes not pushing away a monster
+        for (uint i = 0; i < NB_HEROES; i++) {
+            if (heroes.at(i).is_done()) {
+                continue;
+            }
+            if (not dangers.empty()) {
+                hero_orders[i] = Order(Action::kMove, monsters.at(dangers.front()).p());
+                heroes.at(i).done();
+                monsters.erase(dangers.front());
+                dangers.pop_front();
+            } else {
+                if (monsters.empty()) {
+                    hero_orders[i] = Order(Action::kMove, heroes.at(i).Scout());
+                    heroes.at(i).done();
+                } else {
+                    uint nb_target = heroes.at(i).get_nb_target(monsters);
+                    if (mana > 4 * WIND_MANA && nb_target) {
+                        hero_orders[i] = Order(Action::kWind, Opponent());
+                    } else if (mana > 2 * WIND_MANA && nb_target > 1) {
+                        hero_orders[i] = Order(Action::kWind, Opponent());
+                    } else {
+                        hero_orders[i] =
+                            Order(Action::kMove, monsters.at(others.front()).p());
+                        monsters.erase(others.front());
+                        others.pop_front();
+                    }
+                    heroes.at(i).done();
+                }
+            }
+        }
+
+        for (uint i = 0; i < NB_HEROES; i++) {
+            // Write an action using cout. DON'T FORGET THE "<< endl"
+            // To debug: cerr << "Debug messages..." << endl;
+
+            // In the first league: MOVE <x> <y> | WAIT; In later leagues: | SPELL
+            // <spellParams>;
+            cout << hero_orders.at(i) << endl;
+        }
+    }
+};
 
 int main() {
     int base_x;  // The corner of the map representing your base
@@ -531,21 +717,14 @@ int main() {
 
     top_left = base_x == 0 ? true : false;
     sign = top_left ? 1 : -1;
-    const Point home = top_left ? Point(X_MIN, Y_MIN) : Point(X_MAX, Y_MAX);
 
-    map<int, Hero> heroes;
-    map<int, Monster> monsters;
-    vector<reference_wrapper<Monster>> dangers;
-    array<Point, 3> hero_orders{};
+    Solver solver;
 
     // game loop
     while (1) {
-        monsters.clear();
-        dangers.clear();
+        solver.clear();
         for (int i = 0; i < 2; i++) {
-            int health;  // Each player's base health
-            int mana;  // Ignore in the first league; Spend ten mana to cast a spell
-            cin >> health >> mana;
+            cin >> solver.health >> solver.mana;
             cin.ignore();
         }
         int entity_count;  // Amount of heros and monsters you can see
@@ -570,64 +749,16 @@ int main() {
                 >> vy >> has_target >> threat;
             cin.ignore();
             if (type == 0) {  // monsters
-                monsters.emplace(pair<int&, Monster>(
+                solver.monsters.emplace(pair<int, Monster>(
                     id, {id, x, y, health, vx, vy, has_target, threat}));
             } else if (type == 1) {  // heroes
-                if (not heroes.count(id)) {
-                    heroes.emplace(pair<int&, Hero>(id, {id, x, y}));
+                if (not solver.heroes.count(id)) {
+                    solver.heroes.emplace(pair<int&, Hero>(id, {id, x, y}));
                 } else {
-                    heroes.at(id).update(x, y);
+                    solver.heroes.at(id).update(x, y);
                 }
             }
         }
-        // list monsters targeting our bases
-        // TODO(JG): priorize monster with target
-        for (auto& [id, monster] : monsters) {
-            if (monster.threat() == Threat::kBase) {
-                dangers.emplace_back(ref(monster));
-            }
-        }
-
-        if (dangers.empty()) {
-            for (int i = 0; i < heroes_per_player; i++) {
-                Point dest = standby(i);
-                cout << "MOVE " << dest.x() << " " << dest.y() << endl;
-            }
-            continue;
-        }
-
-        // ensure all heroes have a target
-        while (dangers.size() < static_cast<size_t>(heroes_per_player)) {
-            dangers.push_back(dangers.back());
-        }
-        // priorize target by distance to the base
-        sort(dangers.begin(), dangers.end(), cmpMonster);
-        for (int i = 0; i < heroes_per_player; i++) {
-            int closest{-1};
-            uint min_dist = X_MAX + Y_MAX;
-            for (const auto& [id, hero] : heroes) {
-                uint d = dist(hero.p(), dangers.at(i).get().p());
-                if (d < min_dist) {
-                    min_dist = d;
-                    closest = id;
-                }
-            }
-
-            debug("Monster ", i, ": ", dangers.at(i).get(), " => ", heroes.at(closest));
-            heroes.erase(closest);
-            Point dest = dangers.back().get().p();
-            dest.advance(-sign * MSTR_MOV);
-            hero_orders[i] = dest;
-        }
-
-        for (int i = 0; i < heroes_per_player; i++) {
-            // Write an action using cout. DON'T FORGET THE "<< endl"
-            // To debug: cerr << "Debug messages..." << endl;
-            Point dest = hero_orders[i];
-
-            // In the first league: MOVE <x> <y> | WAIT; In later leagues: | SPELL
-            // <spellParams>;
-            cout << "MOVE " << dest.x() << " " << dest.y() << endl;
-        }
+        solver.compute_heroes_action();
     }
 }
