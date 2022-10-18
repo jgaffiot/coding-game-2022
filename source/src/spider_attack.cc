@@ -157,6 +157,21 @@ inline void PushToStream(std::ostringstream& oss, T&& val, Args&&... args) {
     oss << std::forward<T>(val);
     PushToStream(oss, std::forward<Args>(args)...);
 }
+
+template<typename C, typename D, typename T = typename C::value_type>
+inline std::string JoinImpl(const C& container, const D& delimiter) {
+    size_t n = 0UL;
+    std::ostringstream oss;
+    for (auto& el : container) {
+        if (n == 0UL) {
+            oss << el;
+        } else {
+            oss << delimiter << el;
+        }
+        n++;
+    }
+    return oss.str();
+}
 }  // end namespace detail_string
 
 //! Concatenation of y_ streamable objects into a string, returns a std::string
@@ -165,6 +180,54 @@ inline std::string cat(Args&&... args) {
     std::ostringstream oss;
     detail_string::PushToStream(oss, std::forward<Args>(args)...);
     return oss.str();
+}
+
+//! Simple join of containers into a string, with a char delimiter
+template<
+    typename C,
+    typename T = typename C::value_type,
+    typename = typename std::enable_if<
+        detail_string::is_streamable<std::ostringstream, T>{}>::type>
+inline std::string join(C const& container, char delimiter = ',') {
+    return detail_string::JoinImpl(container, delimiter);
+}
+
+//! Simple join of containers into a string, with a string delimiter
+template<
+    typename C,
+    typename T = typename C::value_type,
+    typename = typename std::enable_if<
+        detail_string::is_streamable<std::ostringstream, T>{}>::type>
+inline std::string join(C const& container, const std::string& delimiter = ", ") {
+    return detail_string::JoinImpl(container, delimiter);
+}
+
+//! Simple splitting of a string, over a char
+inline std::vector<std::string> split(const std::string& s, char delimiter) {
+    std::vector<std::string> tokens;
+    std::string token;
+    std::istringstream iss(s);
+    while (std::getline(iss, token, delimiter)) {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
+
+//! Simple splitting of a string, over a string
+inline std::vector<std::string> split(
+    const std::string& s, const std::string& delimiter) {
+    std::vector<std::string> tokens;
+    size_t pos_start = 0UL;
+    size_t pos_end = s.find(delimiter);
+    size_t delim_len = delimiter.length();
+
+    while (pos_end != std::string::npos) {
+        tokens.push_back(s.substr(pos_start, pos_end - pos_start));
+        pos_start = pos_end + delim_len;
+        pos_end = s.find(delimiter, pos_start);
+    }
+    tokens.push_back(s.substr(pos_start));
+    return tokens;
 }
 
 //! An operator<< on all enum types, enabling easy printing to log or debug
@@ -192,6 +255,12 @@ public:
 private:
     std::string message;
 };
+
+//! Print to stderr to debug
+template<typename... Args>
+void debug(Args&&... args) {
+    cerr << cat(args...) << endl;
+}
 
 // Some constants
 constexpr uint X_MIN{0u};
@@ -329,21 +398,29 @@ public:
         const double t = theta();
         x_ += dist * cos(t);
         y_ += dist * sin(t);
-        x_ = min(max(0u, x_), X_MAX);
-        y_ = min(max(0u, y_), Y_MAX);
+        x_ = min(x_, X_MAX);
+        y_ = min(y_, Y_MAX);
     }
     void advance(const Vector2& speed) {
         x_ += speed.x();
         y_ += speed.y();
-        x_ = min(max(0u, x_), X_MAX);
-        y_ = min(max(0u, y_), Y_MAX);
+        x_ = min(x_, X_MAX);
+        y_ = min(y_, Y_MAX);
     }
     void rotate(double phi) {
         const double sinphi = sin(phi);
         const double cosphi = cos(phi);
-        const double t = x_ * cosphi - y_ * sinphi;
-        y_ = y_ * cosphi + x_ * sinphi;
-        x_ = t;
+        double xd = static_cast<double>(x_);
+        double yd = static_cast<double>(y_);
+
+        const double t = xd * cosphi - yd * sinphi;
+        yd = yd * cosphi + xd * sinphi;
+
+        xd = min(max(t, static_cast<double>(X_MIN)), static_cast<double>(X_MAX));
+        yd = min(max(yd, static_cast<double>(Y_MIN)), static_cast<double>(Y_MAX));
+
+        x_ = static_cast<uint>(xd);
+        y_ = static_cast<uint>(yd);
     }
 
     friend std::ostream& operator<<(std::ostream& os, const Point& p) {
@@ -470,13 +547,11 @@ public:
         return os;
     }
 
-    static struct {
-        bool operator()(const Monster& a, const Monster& b) {
-            auto d_a = a.dist_to(Home());
-            auto d_b = b.dist_to(Home());
-            return d_a > d_b;
-        }
-    } cmp;
+    static bool cmp(const Monster& a, const Monster& b) {
+        auto d_a = a.dist_to(Home());
+        auto d_b = b.dist_to(Home());
+        return d_a < d_b;
+    }
 
 private:
     uint health_;
@@ -503,9 +578,9 @@ public:
     void done() { is_done_ = true; }
     bool is_done() const { return is_done_; }
 
-    Point Scout() {
+    Point scout() {
         if (id() == 0) {
-            return Standby();
+            return standby();
         }
 
         double deviation = Pi() / 3.;
@@ -543,7 +618,7 @@ public:
     }
 
     //! return a default position for our heroes
-    static Point Standby() {
+    static Point standby() {
         return Point(Home().x() + sign * R_FOG_HERO, Home().y() + sign * R_FOG_HERO);
     }
 
@@ -575,8 +650,10 @@ private:
     Point dest_;
 
 public:
-    Order(): action_(Action::kMove), dest_(Hero::Standby()) {}
-    Order(Action action, const Point& dest): action_(action), dest_(dest) {}
+    Order(): action_(Action::kMove), dest_(Hero::standby()) {}
+    Order(Action action, const Point& dest): action_(action), dest_(dest) {
+        debug(*this);
+    }
 
     Action action() const { return action_; }
     const Point& dest() const { return dest_; }
@@ -602,12 +679,6 @@ uint dist(const Point& a, const Point& b) {
         a.y() > b.y() ? a.y() - b.y() : b.y() - a.y()));
 }
 
-//! Print to stderr to debug
-template<typename... Args>
-void debug(Args&&... args) {
-    cerr << cat(args...) << endl;
-}
-
 class Solver {
 public:
     int health;  // base health
@@ -620,6 +691,7 @@ public:
     void clear() {
         monsters.clear();
         dangers.clear();
+        others.clear();
     }
 
     uint get_closest_hero(const Monster& monster) const {
@@ -636,6 +708,8 @@ public:
     }
 
     void compute_heroes_action() {
+        debug("compute_heroes_action");
+        debug("monsters: ", monsters.size());
         // list monsters targeting our bases
         for (auto& [id, monster] : monsters) {
             if (monster.threat() == Threat::kBase) {
@@ -647,21 +721,36 @@ public:
 
         // sort monsters by distance to base
         // TODO(JG): priorize monster with target ?
-        sort(dangers.begin(), dangers.end(), [this](int a, int b) -> bool {
-            return Monster::cmp(monsters.at(a), monsters.at(b));
-        });
-        sort(others.begin(), others.end(), [this](int a, int b) -> bool {
-            return Monster::cmp(monsters.at(a), monsters.at(b));
-        });
+        debug("dangers: ", dangers.size(), "=>", join(dangers, ", "));
+        if (dangers.size() > 1) {
+            sort(dangers.begin(), dangers.end(), [this](int a, int b) -> bool {
+                return Monster::cmp(monsters.at(a), monsters.at(b));
+            });
+        }
+        debug("others: ", others.size(), "=>", join(others, ", "));
+        if (others.size() > 1) {
+            sort(others.begin(), others.end(), [this](int a, int b) -> bool {
+                return Monster::cmp(monsters.at(a), monsters.at(b));
+            });
+        }
 
-        // push away monster if too close of the base
-        if (monsters.at(dangers.front()).dist_to(Home()) < 2 * MSTR_MOV
-            and mana > WIND_MANA) {
-            uint closest = get_closest_hero(monsters.at(dangers.front()));
-            hero_orders[closest] = Order(Action::kWind, Home());
-            heroes.at(closest).done();
-            monsters.erase(dangers.front());
-            dangers.pop_front();
+        debug("push monster");
+        try {
+            // push away monster if too close of the base
+            if (not dangers.empty()
+                and monsters.at(dangers.front()).dist_to(Home()) < 2 * MSTR_MOV
+                and mana > WIND_MANA)
+            {
+                uint closest = get_closest_hero(monsters.at(dangers.front()));
+                debug("Order: ", closest, " => Home: ", Home());
+                hero_orders[closest] = Order(Action::kWind, Opponent());
+                heroes.at(closest).done();
+                monsters.erase(dangers.front());
+                dangers.pop_front();
+            }
+        } catch (const exception& xcpt) {
+            debug("push monster: xcpt.what(), ", dangers.front());
+            debug("closest: ", get_closest_hero(monsters.at(dangers.front())));
         }
 
         // action for heroes not pushing away a monster
@@ -670,21 +759,30 @@ public:
                 continue;
             }
             if (not dangers.empty()) {
+                debug("Order: ", i, " => monsters: ", monsters.at(dangers.front()).p());
                 hero_orders[i] = Order(Action::kMove, monsters.at(dangers.front()).p());
                 heroes.at(i).done();
                 monsters.erase(dangers.front());
                 dangers.pop_front();
             } else {
                 if (monsters.empty()) {
-                    hero_orders[i] = Order(Action::kMove, heroes.at(i).Scout());
+                    debug("Order: ", i, " => heroes::scout: ", heroes.at(i).scout());
+                    hero_orders[i] = Order(Action::kMove, heroes.at(i).scout());
                     heroes.at(i).done();
                 } else {
                     uint nb_target = heroes.at(i).get_nb_target(monsters);
                     if (mana > 4 * WIND_MANA && nb_target) {
+                        debug("Order: ", i, " => Opponent: ", Opponent());
                         hero_orders[i] = Order(Action::kWind, Opponent());
                     } else if (mana > 2 * WIND_MANA && nb_target > 1) {
+                        debug("Order: ", i, " => Opponent: ", Opponent());
                         hero_orders[i] = Order(Action::kWind, Opponent());
                     } else {
+                        debug(
+                            "Order: ",
+                            i,
+                            " => monster:",
+                            monsters.at(others.front()).p());
                         hero_orders[i] =
                             Order(Action::kMove, monsters.at(others.front()).p());
                         monsters.erase(others.front());
