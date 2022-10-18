@@ -442,6 +442,9 @@ public:
     Point operator-(const Point& other) {
         return Point(x_ - other.x(), y_ - other.y());
     }
+    Point operator-(const Vector2& speed) {
+        return Point(x_ - speed.x(), y_ - speed.y());
+    }
     Point operator*(uint d) { return Point(d * x_, d * y_); }
 };
 
@@ -467,7 +470,8 @@ const Point& Opponent() {
 //! An entity on the play field
 class Entity {
 public:
-    Entity(uint id, const Point& p, Type type): id_(id), p_(p), type_(type) {}
+    Entity(uint id, const Point& p, Type type, int shield, int is_controlled):
+        id_(id), p_(p), type_(type), shield_(shield), is_controlled_(is_controlled) {}
     virtual ~Entity() {}
     Entity(const Entity&) = default;
     constexpr Entity(Entity&&) = default;
@@ -477,10 +481,16 @@ public:
     uint id() const { return id_; }
     Point p() const { return p_; }
     Type type() const { return type_; }
+    uint shield() const { return shield_; }
+    bool is_controlled() const { return is_controlled_; }
 
     double dist_to(const Point& p) const { return p_.dist_to(p); }
 
-    void update(uint x, uint y) { p_ = Point(x, y); }
+    void update(uint x, uint y, int shield, int is_controlled) {
+        p_ = Point(x, y);
+        shield_ = shield;
+        is_controlled_ = is_controlled;
+    }
 
     friend std::ostream& operator<<(std::ostream& os, const Entity& e) {
         os << "Entity(" << e.id() << ", " << e.p().x() << ", " << e.p().y() << ")";
@@ -491,6 +501,8 @@ private:
     uint id_;
     Point p_;
     Type type_;
+    uint shield_;
+    bool is_controlled_;
 };
 
 enum class Threat
@@ -505,22 +517,36 @@ public:
     Monster(
         uint id,
         const Point& p,
+        int shield,
+        int is_controlled,
+
         uint health,
         int vx,
         int vy,
         bool has_target,
         int threat):
-        Entity(id, p, Type::kMonster),
+        Entity(id, p, Type::kMonster, shield, is_controlled),
         health_(health),
         v_(vx, vy),
         has_target_(has_target),
         threat_(Threat(threat)) {}
     Monster(
-        int id, int x, int y, int health, int vx, int vy, int has_target, int threat):
+        int id,
+        int x,
+        int y,
+        int shield,
+        int is_controlled,
+        int health,
+        int vx,
+        int vy,
+        int has_target,
+        int threat):
         Entity(
             static_cast<uint>(id),
             {static_cast<uint>(x), static_cast<uint>(y)},
-            Type::kMonster),
+            Type::kMonster,
+            shield,
+            is_controlled),
         health_(static_cast<uint>(health)),
         v_(vx, vy),
         has_target_(static_cast<bool>(has_target)),
@@ -536,8 +562,16 @@ public:
     Threat threat() const { return threat_; }
 
     void update(
-        uint x, uint y, uint health, int vx, int vy, bool has_target, int threat) {
-        Entity::update(x, y);
+        uint x,
+        uint y,
+        int shield,
+        int is_controlled,
+        uint health,
+        int vx,
+        int vy,
+        bool has_target,
+        int threat) {
+        Entity::update(x, y, shield, is_controlled);
         health_ = health;
         v_ = Vector2(vx, vy);
         has_target_ = has_target;
@@ -567,16 +601,19 @@ private:
 
 class Hero: public Entity {
 public:
-    Hero(uint id, const Point& p): Entity(id, p, Type::kHero) {}
-    Hero(int id, int x, int y):
+    Hero(uint id, const Point& p, int shield, int is_controlled):
+        Entity(id, p, Type::kHero, shield, is_controlled) {}
+    Hero(int id, int x, int y, int shield, int is_controlled):
         Entity(
             static_cast<uint>(id),
             {static_cast<uint>(x), static_cast<uint>(y)},
-            Type::kHero) {}
+            Type::kHero,
+            shield,
+            is_controlled) {}
 
-    void update(uint x, uint y) {
+    void update(uint x, uint y, int shield, int is_controlled) {
         prev_ = p();
-        Entity::update(x, y);
+        Entity::update(x, y, shield, is_controlled);
         is_done_ = false;
     }
 
@@ -588,20 +625,28 @@ public:
             return standby();
         }
 
-        double deviation = Pi() / 6.;
-        if (id() == 2) {
-            deviation *= -1.;
+        if (id() == 1) {
+            Point dest;
+            double dist = dist_to(Home());
+            if (dist > 2u * R_FOG_BASE) {
+                dest = Home();
+            } else if (dist > R_FOG_BASE) {
+                dest = dest_;
+            } else {
+                dest = Opponent();
+            }
+            dest_ = dest;
+            return dest;
         }
 
         Point dest;
-        double dist = dist_to(Home());
-        if (dist > 15000) {
-            dest = Home();
-        } else if (dist > R_FOG_BASE + R_FOG_HERO) {
+        double dist = dist_to(Opponent());
+        if (dist > 2u * R_FOG_BASE) {
+            dest = Opponent();
+        } else if (dist > R_FOG_BASE / 2u) {
             dest = dest_;
         } else {
-            dest = Opponent();
-            dest.rotate(deviation);
+            dest = Home();
         }
         dest_ = dest;
         return dest;
@@ -635,14 +680,19 @@ private:
 
 class Vilain: public Entity {
 public:
-    Vilain(uint id, const Point& p): Entity(id, p, Type::kVilain) {}
-    Vilain(int id, int x, int y):
+    Vilain(uint id, const Point& p, int shield, int is_controlled):
+        Entity(id, p, Type::kVilain, shield, is_controlled) {}
+    Vilain(int id, int x, int y, int shield, int is_controlled):
         Entity(
             static_cast<uint>(id),
             {static_cast<uint>(x), static_cast<uint>(y)},
-            Type::kVilain) {}
+            Type::kVilain,
+            shield,
+            is_controlled) {}
 
-    void update(uint x, uint y) { Entity::update(x, y); }
+    void update(uint x, uint y, int shield, int is_controlled) {
+        Entity::update(x, y, shield, is_controlled);
+    }
 
     friend std::ostream& operator<<(std::ostream& os, const Vilain& o) {
         os << "Vilain(" << o.id() << ", " << o.p().x() << ", " << o.p().y() << ")";
@@ -708,13 +758,14 @@ public:
     map<int, Hero> heroes;
     map<int, Vilain> vilains;
     map<int, Monster> monsters;
-    deque<int> dangers, others;
+    deque<int> dangers, others, friends;
     array<Order, 3> hero_orders{};
 
     void clear() {
         monsters.clear();
         dangers.clear();
         others.clear();
+        friends.clear();
     }
 
     uint get_closest_hero(const Monster& monster) const {
@@ -763,6 +814,8 @@ public:
         for (const auto& [id, monster] : monsters) {
             if (monster.threat() == Threat::kBase) {
                 dangers.push_back(id);
+            } else if (monster.threat() == Threat::kOpp) {
+                friends.push_back(id);
             } else {
                 others.push_back(id);
             }
@@ -779,6 +832,12 @@ public:
         debug("others: ", others.size(), "=>", join(others, ", "));
         if (others.size() > 1) {
             sort(others.begin(), others.end(), [this](int a, int b) -> bool {
+                return Monster::cmp(monsters.at(a), monsters.at(b));
+            });
+        }
+        debug("friends: ", friends.size(), "=>", join(friends, ", "));
+        if (friends.size() > 1) {
+            sort(friends.begin(), friends.end(), [this](int a, int b) -> bool {
                 return Monster::cmp(monsters.at(a), monsters.at(b));
             });
         }
@@ -801,7 +860,7 @@ public:
                 and mana > MANA_COST)
             {
                 uint closest = get_closest_hero(monsters.at(dangers.front()));
-                debug("Order: ", closest, " => Home: ", Home());
+                debug("Order: ", closest, " => wind to opp");
                 hero_orders[closest] = Order(Action::kWind, Opponent());
                 heroes.at(closest).done();
                 monsters.erase(dangers.front());
@@ -818,27 +877,25 @@ public:
                 continue;
             }
             if (not dangers.empty()) {
-                debug("Order: ", i, " => monsters: ", monsters.at(dangers.front()).p());
+                debug("Order: ", i, " => attack: ", monsters.at(dangers.front()).p());
                 hero_orders[i] = Order(Action::kMove, monsters.at(dangers.front()).p());
                 heroes.at(i).done();
                 monsters.erase(dangers.front());
                 dangers.pop_front();
             } else {
-                if (monsters.empty()) {
-                    debug("Order: ", i, " => heroes::scout: ", heroes.at(i).scout());
+                debug("no danger");
+                if (others.empty()) {
+                    debug("Order: ", i, " => scout: ", heroes.at(i).scout());
                     hero_orders[i] = Order(Action::kMove, heroes.at(i).scout());
                     heroes.at(i).done();
                 } else {
                     uint nb_target = heroes.at(i).get_nb_target(monsters);
                     if (mana > 3 * MANA_COST and nb_target > 1) {
-                        debug("Order: ", i, " => Opponent: ", Opponent());
+                        debug("Order: ", i, " => wind to opp");
                         hero_orders[i] = Order(Action::kWind, Opponent());
                     } else {
                         debug(
-                            "Order: ",
-                            i,
-                            " => monster:",
-                            monsters.at(others.front()).p());
+                            "Order: ", i, " => atck:", monsters.at(others.front()).p());
                         hero_orders[i] =
                             Order(Action::kMove, monsters.at(others.front()).p());
                         monsters.erase(others.front());
@@ -849,22 +906,51 @@ public:
             }
         }
 
+        debug("attacker");
         if (not heroes.at(2).is_done()) {
             Hero& h = heroes.at(2);
-            auto closest_monster = get_closest_monster_to_opponent();
-            auto closest_vilain = get_closest_vilain(h);
-            if (mana > 3 * MANA_COST and closest_monster.first != -1
-                and closest_monster.second < MSTR_SHIELD_MOV
-                and h.dist_to(monsters.at(closest_monster.first).p()) < R_SHIELD)
+            auto [mstr_id, mstr_dist] = get_closest_monster_to_opponent();
+            Monster* closest_monster = mstr_id != -1 ? &monsters.at(mstr_id) : nullptr;
+            auto [vil_id, vil_dist] = get_closest_vilain(h);
+            Vilain* closest_vilain = vil_id != -1 ? &vilains.at(vil_id) : nullptr;
+
+            if (mana > 3 * MANA_COST and mstr_id != -1 and mstr_dist < MSTR_SHIELD_MOV
+                and h.dist_to(closest_monster->p()) < R_SHIELD
+                and not closest_monster->shield())
             {
-                debug("Order: 2 => Shield mstr: ", closest_monster.first);
-                hero_orders[2] = Order(Action::kShield, Home(), closest_monster.first);
+                debug("Order: 2 => Shield mstr: ", closest_monster);
+                hero_orders[2] = Order(Action::kShield, Home(), mstr_id);
             } else if (
-                mana > 3 * MANA_COST and closest_vilain.first != -1
-                and closest_vilain.second < R_CTRL)
+                mana > 3 * MANA_COST and vil_id != -1 and vil_dist < R_CTRL
+                and closest_vilain->dist_to(Opponent()) < R_FOG_BASE
+                and not closest_vilain->shield()
+                and not closest_vilain->is_controlled())
             {
-                hero_orders[2] = Order(Action::kControl, kCorner, closest_vilain.first);
+                debug("Order: 2 => Control vilain: ", vil_id, "(", vil_dist, ")");
+                hero_orders[2] = Order(Action::kControl, kCorner, vil_id);
+            } else if (
+                mana > 3 * MANA_COST and mstr_id != -1
+                and h.dist_to(closest_monster->p()) < R_CTRL
+                and closest_monster->threat() != Threat::kOpp
+                and not closest_monster->shield()
+                and not closest_monster->is_controlled())
+            {
+                debug("Order: 2 => Control monster: ", closest_monster);
+                hero_orders[2] = Order(Action::kControl, Opponent(), mstr_id);
+            } else if (not others.empty()) {
+                double min_dist = numeric_limits<double>::max();
+                int closest = -1;
+                for (int other : others) {
+                    double d = h.dist_to(monsters.at(other).p());
+                    if (d < min_dist) {
+                        min_dist = d;
+                        closest = other;
+                    }
+                }
+                debug("Order: 2 => attack: ", closest);
+                hero_orders[2] = Order(Action::kMove, monsters.at(closest).p());
             } else {
+                debug("Order: 2 => scout: ", h.scout());
                 hero_orders[2] = Order(Action::kMove, h.scout());
             }
         }
@@ -910,36 +996,46 @@ int main() {
             int type;  // 0=monster, 1=your hero, 2=opponent hero
             int x;  // Position of this entity
             int y;
-            int shield_life;  // Ignore for this league; Count down until shield spell
-                              // fades
-            int is_controlled;  // Ignore for this league; Equals 1 when this entity is
-                                // under a control spell
+            int shield;  // Count down until shield spell fades
+            int is_controlled;  // Equals 1 when this entity is under a control spell
             int health;  // Remaining health of this monster
             int vx;  // Trajectory of this monster
             int vy;
             int has_target;  // 0=monster with no target yet, 1=monster targeting a base
             int threat;  // Given this monster's trajectory, is it a threat to
                          // 1=your base, 2=your opponent's base, 0=neither
-            cin >> id >> type >> x >> y >> shield_life >> is_controlled >> health >> vx
-                >> vy >> has_target >> threat;
+            cin >> id >> type >> x >> y >> shield >> is_controlled >> health >> vx >> vy
+                >> has_target >> threat;
             cin.ignore();
             if (type == 0) {  // monsters
                 solver.monsters.emplace(pair<int, Monster>(
-                    id, {id, x, y, health, vx, vy, has_target, threat}));
+                    id,
+                    {id,
+                     x,
+                     y,
+                     shield,
+                     is_controlled,
+                     health,
+                     vx,
+                     vy,
+                     has_target,
+                     threat}));
             } else if (type == 1) {  // heroes
                 if (not top_left) {
                     id -= 3;
                 }
                 if (not solver.heroes.count(id)) {
-                    solver.heroes.emplace(pair<int&, Hero>(id, {id, x, y}));
+                    solver.heroes.emplace(
+                        pair<int&, Hero>(id, {id, x, y, shield, is_controlled}));
                 } else {
-                    solver.heroes.at(id).update(x, y);
+                    solver.heroes.at(id).update(x, y, shield, is_controlled);
                 }
             } else {
                 if (not solver.vilains.count(id)) {
-                    solver.vilains.emplace(pair<int&, Vilain>(id, {id, x, y}));
+                    solver.vilains.emplace(
+                        pair<int&, Vilain>(id, {id, x, y, shield, is_controlled}));
                 } else {
-                    solver.vilains.at(id).update(x, y);
+                    solver.vilains.at(id).update(x, y, shield, is_controlled);
                 }
             }
         }
