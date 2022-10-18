@@ -277,7 +277,11 @@ constexpr uint R_FOG_BASE{6000u};  // base fog radius
 constexpr uint R_FOG_HERO{2200u};  // hero fog radius
 constexpr uint R_WIND{1280u};  // wind spell effect radius
 constexpr uint WIND_MOV{2200u};  // wind spell movement
-constexpr uint WIND_MANA{10u};
+constexpr uint SHIELD_TIME{12u};  // wind spell movement
+constexpr uint R_SHIELD{2200u};
+constexpr uint R_CTRL{2200u};
+constexpr uint MANA_COST{10u};
+constexpr uint MSTR_SHIELD_MOV = SHIELD_TIME * MSTR_MOV;
 
 //! A 2-dimension mathematical vector to represent speed
 class Vector2 {
@@ -445,11 +449,12 @@ enum class Type
 {
     kMonster,
     kHero,
-    kOpponent
+    kVilain
 };
 
 // global variable to indicate if our base is top left (else bottom rifght)
 static const array<Point, 2> kBases{Point{X_MAX, Y_MAX}, Point{X_MIN, Y_MIN}};
+static const Point kCorner(X_MAX, Y_MIN);
 bool top_left{true};
 int sign{0};
 const Point& Home() {
@@ -492,7 +497,7 @@ enum class Threat
 {
     kNone,
     kBase,
-    kOpponent
+    kOpp
 };
 
 class Monster: public Entity {
@@ -628,12 +633,19 @@ private:
     Point dest_{Home()};
 };
 
-class Opponent: public Entity {
+class Vilain: public Entity {
 public:
-    Opponent(uint id, const Point& p): Entity(id, p, Type::kOpponent) {}
+    Vilain(uint id, const Point& p): Entity(id, p, Type::kVilain) {}
+    Vilain(int id, int x, int y):
+        Entity(
+            static_cast<uint>(id),
+            {static_cast<uint>(x), static_cast<uint>(y)},
+            Type::kVilain) {}
 
-    friend std::ostream& operator<<(std::ostream& os, const Opponent& o) {
-        os << "Opponent(" << o.id() << ", " << o.p().x() << ", " << o.p().y() << ")";
+    void update(uint x, uint y) { Entity::update(x, y); }
+
+    friend std::ostream& operator<<(std::ostream& os, const Vilain& o) {
+        os << "Vilain(" << o.id() << ", " << o.p().x() << ", " << o.p().y() << ")";
         return os;
     }
 };
@@ -641,17 +653,21 @@ public:
 enum class Action
 {
     kMove,
-    kWind
+    kWind,
+    kShield,
+    kControl
 };
 
 class Order {
 private:
     Action action_;
     Point dest_;
+    uint id_;
 
 public:
-    Order(): action_(Action::kMove), dest_(Hero::standby()) {}
-    Order(Action action, const Point& dest): action_(action), dest_(dest) {
+    Order(): action_(Action::kMove), dest_(Hero::standby()), id_{0u} {}
+    Order(Action action, const Point& dest, uint id = 0u):
+        action_(action), dest_(dest), id_(id) {
         debug(*this);
     }
 
@@ -661,13 +677,19 @@ public:
     friend ostream& operator<<(ostream& os, const Order& order) {
         switch (order.action()) {
             case Action::kMove:
-                os << "MOVE ";
+                os << "MOVE " << order.dest().x() << " " << order.dest().y();
                 break;
             case Action::kWind:
-                os << "SPELL WIND ";
+                os << "SPELL WIND " << order.dest().x() << " " << order.dest().y();
+                break;
+            case Action::kShield:
+                os << "SPELL SHIELD " << order.id_;
+                break;
+            case Action::kControl:
+                os << "SPELL CONTROL " << order.id_ << " " << order.dest().x() << " "
+                   << order.dest().y();
                 break;
         }
-        os << order.dest().x() << " " << order.dest().y();
         return os;
     }
 };
@@ -684,6 +706,7 @@ public:
     int health;  // base health
     int mana;  // Spend ten mana to cast a spell
     map<int, Hero> heroes;
+    map<int, Vilain> vilains;
     map<int, Monster> monsters;
     deque<int> dangers, others;
     array<Order, 3> hero_orders{};
@@ -707,11 +730,37 @@ public:
         return closest;
     }
 
+    pair<int, double> get_closest_monster_to_opponent() const {
+        double min_dist = numeric_limits<double>::max();
+        int closest = -1;
+        for (const auto& [id, monster] : monsters) {
+            double dist = monster.dist_to(Opponent());
+            if (dist < min_dist) {
+                min_dist = dist;
+                closest = id;
+            }
+        }
+        return {closest, min_dist};
+    }
+
+    pair<int, double> get_closest_vilain(const Hero& hero) const {
+        double min_dist = numeric_limits<double>::max();
+        int closest = -1;
+        for (const auto& [id, vilain] : vilains) {
+            double dist = vilain.dist_to(hero.p());
+            if (dist < min_dist) {
+                min_dist = dist;
+                closest = id;
+            }
+        }
+        return {closest, min_dist};
+    }
+
     void compute_heroes_action() {
         debug("compute_heroes_action");
         debug("monsters: ", monsters.size());
         // list monsters targeting our bases
-        for (auto& [id, monster] : monsters) {
+        for (const auto& [id, monster] : monsters) {
             if (monster.threat() == Threat::kBase) {
                 dangers.push_back(id);
             } else {
@@ -743,13 +792,13 @@ public:
                 ", mana=",
                 mana,
                 " >? ",
-                WIND_MANA);
+                MANA_COST);
         }
         try {
-            // push away monster if too close of the base
+            // push away monster if too close of the baseCorner
             if (not dangers.empty()
                 and monsters.at(dangers.front()).dist_to(Home()) < 2 * MSTR_MOV
-                and mana > WIND_MANA)
+                and mana > MANA_COST)
             {
                 uint closest = get_closest_hero(monsters.at(dangers.front()));
                 debug("Order: ", closest, " => Home: ", Home());
@@ -764,7 +813,7 @@ public:
         }
 
         // action for heroes not pushing away a monster
-        for (uint i = 0; i < NB_HEROES; i++) {
+        for (uint i = 0; i < NB_HEROES - 1; i++) {
             if (heroes.at(i).is_done()) {
                 continue;
             }
@@ -781,10 +830,7 @@ public:
                     heroes.at(i).done();
                 } else {
                     uint nb_target = heroes.at(i).get_nb_target(monsters);
-                    if (mana > 4 * WIND_MANA && nb_target) {
-                        debug("Order: ", i, " => Opponent: ", Opponent());
-                        hero_orders[i] = Order(Action::kWind, Opponent());
-                    } else if (mana > 2 * WIND_MANA && nb_target > 1) {
+                    if (mana > 3 * MANA_COST and nb_target > 1) {
                         debug("Order: ", i, " => Opponent: ", Opponent());
                         hero_orders[i] = Order(Action::kWind, Opponent());
                     } else {
@@ -800,6 +846,26 @@ public:
                     }
                     heroes.at(i).done();
                 }
+            }
+        }
+
+        if (not heroes.at(2).is_done()) {
+            Hero& h = heroes.at(2);
+            auto closest_monster = get_closest_monster_to_opponent();
+            auto closest_vilain = get_closest_vilain(h);
+            if (mana > 3 * MANA_COST and closest_monster.first != -1
+                and closest_monster.second < MSTR_SHIELD_MOV
+                and h.dist_to(monsters.at(closest_monster.first).p()) < R_SHIELD)
+            {
+                debug("Order: 2 => Shield mstr: ", closest_monster.first);
+                hero_orders[2] = Order(Action::kShield, Home(), closest_monster.first);
+            } else if (
+                mana > 3 * MANA_COST and closest_vilain.first != -1
+                and closest_vilain.second < R_CTRL)
+            {
+                hero_orders[2] = Order(Action::kControl, kCorner, closest_vilain.first);
+            } else {
+                hero_orders[2] = Order(Action::kMove, h.scout());
             }
         }
 
@@ -868,6 +934,12 @@ int main() {
                     solver.heroes.emplace(pair<int&, Hero>(id, {id, x, y}));
                 } else {
                     solver.heroes.at(id).update(x, y);
+                }
+            } else {
+                if (not solver.vilains.count(id)) {
+                    solver.vilains.emplace(pair<int&, Vilain>(id, {id, x, y}));
+                } else {
+                    solver.vilains.at(id).update(x, y);
                 }
             }
         }
