@@ -592,6 +592,12 @@ public:
         return d_a < d_b;
     }
 
+    static bool anti_cmp(const Monster& a, const Monster& b) {
+        auto d_a = a.dist_to(Opponent());
+        auto d_b = b.dist_to(Opponent());
+        return d_a > d_b;
+    }
+
 private:
     uint health_;
     Vector2 v_;
@@ -641,9 +647,9 @@ public:
 
         Point dest;
         double dist = dist_to(Opponent());
-        if (dist > 2u * R_FOG_BASE) {
+        if (dist > R_FOG_BASE + R_FOG_BASE / 2u) {
             dest = Opponent();
-        } else if (dist > R_FOG_BASE / 2u) {
+        } else if (dist > R_FOG_BASE / 4u * 3u) {
             dest = dest_;
         } else {
             dest = Home();
@@ -766,6 +772,7 @@ public:
         dangers.clear();
         others.clear();
         friends.clear();
+        vilains.clear();
     }
 
     uint get_closest_hero(const Monster& monster) const {
@@ -906,50 +913,74 @@ public:
             }
         }
 
-        debug("attacker");
         if (not heroes.at(2).is_done()) {
             Hero& h = heroes.at(2);
-            auto [mstr_id, mstr_dist] = get_closest_monster_to_opponent();
-            Monster* closest_monster = mstr_id != -1 ? &monsters.at(mstr_id) : nullptr;
-            auto [vil_id, vil_dist] = get_closest_vilain(h);
-            Vilain* closest_vilain = vil_id != -1 ? &vilains.at(vil_id) : nullptr;
 
-            if (mana > 3 * MANA_COST and mstr_id != -1 and mstr_dist < MSTR_SHIELD_MOV
-                and h.dist_to(closest_monster->p()) < R_SHIELD
-                and not closest_monster->shield())
-            {
-                debug("Order: 2 => Shield mstr: ", closest_monster);
-                hero_orders[2] = Order(Action::kShield, Home(), mstr_id);
-            } else if (
-                mana > 3 * MANA_COST and vil_id != -1 and vil_dist < R_CTRL
-                and closest_vilain->dist_to(Opponent()) < R_FOG_BASE
-                and not closest_vilain->shield()
-                and not closest_vilain->is_controlled())
-            {
-                debug("Order: 2 => Control vilain: ", vil_id, "(", vil_dist, ")");
-                hero_orders[2] = Order(Action::kControl, kCorner, vil_id);
-            } else if (
-                mana > 3 * MANA_COST and mstr_id != -1
-                and h.dist_to(closest_monster->p()) < R_CTRL
-                and closest_monster->threat() != Threat::kOpp
-                and not closest_monster->shield()
-                and not closest_monster->is_controlled())
-            {
-                debug("Order: 2 => Control monster: ", closest_monster);
-                hero_orders[2] = Order(Action::kControl, Opponent(), mstr_id);
-            } else if (not others.empty()) {
-                double min_dist = numeric_limits<double>::max();
-                int closest = -1;
-                for (int other : others) {
-                    double d = h.dist_to(monsters.at(other).p());
-                    if (d < min_dist) {
-                        min_dist = d;
-                        closest = other;
+            if (not h.is_done()) {
+                uint nb_target = h.get_nb_target(monsters);
+                if (mana > 3 * MANA_COST and nb_target > 2) {
+                    debug("Order: 2 => wind to opp");
+                    hero_orders[2] = Order(Action::kWind, Opponent());
+                    h.done();
+                }
+            }
+
+            if (not h.is_done()) {
+                for (const auto& [id, monster] : monsters) {
+                    if (mana > 3 * MANA_COST
+                        and monster.dist_to(Opponent()) < MSTR_SHIELD_MOV
+                        and monster.dist_to(h.p()) < R_SHIELD and not monster.shield()
+                        and not monster.is_controlled())
+                    {
+                        debug("Order: 2 => Shield mstr: ", monster);
+                        hero_orders[2] = Order(Action::kShield, Home(), id);
+                        h.done();
                     }
                 }
-                debug("Order: 2 => attack: ", closest);
-                hero_orders[2] = Order(Action::kMove, monsters.at(closest).p());
-            } else {
+            }
+
+            if (not h.is_done()) {
+                for (const auto& [id, vilain] : vilains) {
+                    if (mana > 3 * MANA_COST and vilain.dist_to(h.p()) < R_CTRL
+                        and vilain.dist_to(Opponent()) < R_FOG_BASE
+                        and not vilain.shield() and not vilain.is_controlled())
+                    {
+                        debug("Order: 2 => Control vilain: ", vilain);
+                        hero_orders[2] = Order(Action::kControl, Home(), id);
+                        h.done();
+                    }
+                }
+            }
+
+            if (not h.is_done()) {
+                for (const auto& [id, monster] : monsters) {
+                    if (mana > 3 * MANA_COST and monster.dist_to(h.p()) < R_CTRL
+                        and monster.threat() != Threat::kOpp and not monster.shield()
+                        and not monster.is_controlled())
+                    {
+                        debug("Order: 2 => Control monster: ", monster);
+                        hero_orders[2] = Order(Action::kControl, Opponent(), id);
+                        h.done();
+                    }
+                }
+            }
+
+            //             if (not h.is_done() and not others.empty()) {
+            //                 double min_dist = numeric_limits<double>::max();
+            //                 int closest = -1;
+            //                 for (int other : others) {
+            //                     double d = h.dist_to(monsters.at(other).p());
+            //                     if (d < min_dist) {
+            //                         min_dist = d;
+            //                         closest = other;
+            //                     }
+            //                 }
+            //                 debug("Order: 2 => attack: ", closest);
+            //                 hero_orders[2] = Order(Action::kMove,
+            //                 monsters.at(closest).p()); h.done();
+            //             }
+
+            if (not h.is_done()) {
                 debug("Order: 2 => scout: ", h.scout());
                 hero_orders[2] = Order(Action::kMove, h.scout());
             }
@@ -1031,12 +1062,8 @@ int main() {
                     solver.heroes.at(id).update(x, y, shield, is_controlled);
                 }
             } else {
-                if (not solver.vilains.count(id)) {
-                    solver.vilains.emplace(
-                        pair<int&, Vilain>(id, {id, x, y, shield, is_controlled}));
-                } else {
-                    solver.vilains.at(id).update(x, y, shield, is_controlled);
-                }
+                solver.vilains.emplace(
+                    pair<int&, Vilain>(id, {id, x, y, shield, is_controlled}));
             }
         }
         solver.compute_heroes_action();
