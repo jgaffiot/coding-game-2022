@@ -583,7 +583,7 @@ public:
             return standby();
         }
 
-        double deviation = Pi() / 3.;
+        double deviation = Pi() / 6.;
         if (id() == 2) {
             deviation *= -1.;
         }
@@ -664,7 +664,7 @@ public:
                 os << "MOVE ";
                 break;
             case Action::kWind:
-                os << "WIND ";
+                os << "SPELL WIND ";
                 break;
         }
         os << order.dest().x() << " " << order.dest().y();
@@ -734,7 +734,17 @@ public:
             });
         }
 
-        debug("push monster");
+        if (not dangers.empty()) {
+            debug(
+                "push monster: dist=",
+                monsters.at(dangers.front()).dist_to(Home()),
+                " <? ",
+                2 * MSTR_MOV,
+                ", mana=",
+                mana,
+                " >? ",
+                WIND_MANA);
+        }
         try {
             // push away monster if too close of the base
             if (not dangers.empty()
@@ -819,12 +829,13 @@ int main() {
     Solver solver;
 
     // game loop
+    int dump;
     while (1) {
         solver.clear();
-        for (int i = 0; i < 2; i++) {
-            cin >> solver.health >> solver.mana;
-            cin.ignore();
-        }
+        cin >> solver.health >> solver.mana;
+        cin.ignore();
+        cin >> dump >> dump;
+        cin.ignore();
         int entity_count;  // Amount of heros and monsters you can see
         cin >> entity_count;
         cin.ignore();
@@ -850,6 +861,9 @@ int main() {
                 solver.monsters.emplace(pair<int, Monster>(
                     id, {id, x, y, health, vx, vy, has_target, threat}));
             } else if (type == 1) {  // heroes
+                if (not top_left) {
+                    id -= 3;
+                }
                 if (not solver.heroes.count(id)) {
                     solver.heroes.emplace(pair<int&, Hero>(id, {id, x, y}));
                 } else {
