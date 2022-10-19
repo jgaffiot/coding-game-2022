@@ -278,6 +278,7 @@ constexpr uint R_FOG_HERO{2200u};  // hero fog radius
 constexpr uint R_WIND{1280u};  // wind spell effect radius
 constexpr uint WIND_MOV{2200u};  // wind spell movement
 constexpr uint SHIELD_TIME{12u};  // wind spell movement
+constexpr uint FOCUS_RANGE{5000u};
 constexpr uint R_SHIELD{2200u};
 constexpr uint R_CTRL{2200u};
 constexpr uint MANA_COST{10u};
@@ -432,17 +433,17 @@ public:
         return os;
     }
 
-    bool operator==(const Point& other) { return x_ == other.x() and y_ == other.y(); }
-    Point operator+(const Point& other) {
+    bool operator==(const Point& other) const { return x_ == other.x() and y_ == other.y(); }
+    Point operator+(const Point& other) const {
         return Point(x_ + other.x(), y_ + other.y());
     }
-    Point operator+(const Vector2& speed) {
+    Point operator+(const Vector2& speed) const {
         return Point(x_ + speed.x(), y_ + speed.y());
     }
-    Point operator-(const Point& other) {
+    Point operator-(const Point& other) const {
         return Point(x_ - other.x(), y_ - other.y());
     }
-    Point operator-(const Vector2& speed) {
+    Point operator-(const Vector2& speed) const {
         return Point(x_ - speed.x(), y_ - speed.y());
     }
     Point operator*(uint d) { return Point(d * x_, d * y_); }
@@ -512,6 +513,17 @@ enum class Threat
     kOpp
 };
 
+Point threat_destination(Threat threat) {
+    switch(threat) {
+    case Threat::kBase: 
+        return Home();
+    case Threat::kOpp: 
+        return Opponent();
+    default:
+        return Point();
+    }
+}
+
 class Monster: public Entity {
 public:
     Monster(
@@ -578,6 +590,17 @@ public:
         threat_ = Threat(threat);
     }
 
+    int turn_to_kill() {
+        if (not has_target()) {
+            numeric_limits<int>::max();
+        }
+        return static_cast<int>(ceil((p().dist_to(threat_destination(threat_)) - R_BASE) / MSTR_MOV));
+    }
+
+    bool soloable() {
+        return turn_to_kill() * DMG >= health_; 
+    }
+
     friend std::ostream& operator<<(std::ostream& os, const Monster& m) {
         os << "Monster(" << m.id() << ", " << m.p().x() << ", " << m.p().y() << ", "
            << m.health() << ", " << m.v() << ", "
@@ -621,10 +644,12 @@ public:
         prev_ = p();
         Entity::update(x, y, shield, is_controlled);
         is_done_ = false;
+        has_been_controlled_ |= is_controlled;
     }
 
     void done() { is_done_ = true; }
     bool is_done() const { return is_done_; }
+    bool has_been_controlled() const { return has_been_controlled_; }
 
     Point scout() {
         if (id() == 0) {
@@ -680,6 +705,7 @@ public:
 
 private:
     bool is_done_{false};
+    bool has_been_controlled_{false};
     Point prev_{Home()};
     Point dest_{Home()};
 };
@@ -861,10 +887,11 @@ public:
                 MANA_COST);
         }
         try {
-            // push away monster if too close of the baseCorner
+            // push away unshield monster if too close of the baseCorner
             if (not dangers.empty()
                 and monsters.at(dangers.front()).dist_to(Home()) < 2 * MSTR_MOV
-                and mana > MANA_COST)
+                and mana > MANA_COST
+                and not monsters.at(dangers.front()).shield())
             {
                 uint closest = get_closest_hero(monsters.at(dangers.front()));
                 debug("Order: ", closest, " => wind to opp");
@@ -883,15 +910,43 @@ public:
             if (heroes.at(i).is_done()) {
                 continue;
             }
-            if (not dangers.empty()) {
+
+            for (int id : dangers) {
+                auto vec = Vector2::from_polar(R_WIND, (Opponent() - monsters.at(id).p()).theta());
+                Point landing = monsters.at(id).p() + vec;
+                debug("landing ", id, " ", landing);
+                if (landing.dist_to(Home()) > FOCUS_RANGE) {
+                    debug("landing OUTSIDE");
+                }
+            }
+
+            if (false) {
+
+            } else if (auto [id, d] = get_closest_vilain(heroes.at(i)); id != -1
+                and vilains.at(id).p().dist_to(Home()) <= FOCUS_RANGE
+                and not vilains.at(id).shield()
+                and d <= R_CTRL
+                and mana > 3 * MANA_COST)
+            {          
+                debug("Order: ", i, " => ctrl def: ", id);
+                hero_orders[i] = Order(Action::kControl, Opponent(), id);
+                heroes.at(i).done();
+            } else if (not dangers.empty()) {
                 debug("Order: ", i, " => attack: ", monsters.at(dangers.front()).p());
                 hero_orders[i] = Order(Action::kMove, monsters.at(dangers.front()).p());
                 heroes.at(i).done();
-                monsters.erase(dangers.front());
-                dangers.pop_front();
+                // only remove from dangers if not a big threat
+                if (monsters.at(dangers.front()).soloable()) {
+                    monsters.erase(dangers.front());
+                    dangers.pop_front();
+                }
             } else {
                 debug("no danger");
-                if (others.empty()) {
+                if (heroes.at(0).has_been_controlled() and not heroes.at(0).shield()) {
+                    debug("Order: ", i, " => preemptive protec: ", heroes.at(0).id());
+                    hero_orders[i] = Order(Action::kShield, Point(), heroes.at(0).id());
+                    heroes.at(i).done();
+                } else if (others.empty()) {
                     debug("Order: ", i, " => scout: ", heroes.at(i).scout());
                     hero_orders[i] = Order(Action::kMove, heroes.at(i).scout());
                     heroes.at(i).done();
