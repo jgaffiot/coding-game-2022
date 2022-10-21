@@ -858,15 +858,26 @@ public:
 
     void hunt(uint id) {
         Hero& h = heroes.at(id);
-        if (not dangers.empty()) {
-            debug("Order: ", id, " => attack: ", monsters.at(dangers.front()).p());
-            h.order(Action::kMove, monsters.at(dangers.front()).p());
-        } else if (not others.empty()) {
-            debug("Order: ", id, " => attack: ", monsters.at(others.front()).p());
-            h.order(Action::kMove, monsters.at(others.front()).p());
-        } else {
+        double min_dist = numeric_limits<double>::max();
+        int closest = -1;
+        for (const auto& [id, el] : monsters) {
+            if (el.threat() == Threat::kOpp
+                or el.dist_to(Opponent()) > R_FOG_BASE + R_FOG_HERO) {
+                continue;
+            }
+            double dist = el.dist_to(h.p());
+            if (dist < min_dist) {
+                min_dist = dist;
+                closest = id;
+            }
+        }
+
+        if (closest == -1) {
             debug("Order: 2 => scout: ", h.scout());
             h.order(Action::kMove, h.scout());
+        } else {
+            debug("Order: ", id, " => attack: ", monsters.at(closest).p());
+            h.order(Action::kMove, monsters.at(closest).p());
         }
     }
 
