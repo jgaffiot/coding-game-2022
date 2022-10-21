@@ -428,25 +428,31 @@ public:
         y_ = static_cast<uint>(yd);
     }
 
+    Vector2 vec() const { return Vector2(x_, y_); }
+
     friend std::ostream& operator<<(std::ostream& os, const Point& p) {
         os << "Point(" << p.x() << ", " << p.y() << ")";
         return os;
     }
 
-    bool operator==(const Point& other) { return x_ == other.x() and y_ == other.y(); }
-    Point operator+(const Point& other) {
+    bool operator==(const Point& other) const {
+        return x_ == other.x() and y_ == other.y();
+    }
+    Point operator+(const Point& other) const {
         return Point(x_ + other.x(), y_ + other.y());
     }
-    Point operator+(const Vector2& speed) {
-        return Point(x_ + speed.x(), y_ + speed.y());
+    Point operator+(const Vector2& speed) const {
+        return Point(
+            min<uint>(x_ + speed.x(), X_MAX), min<uint>(y_ + speed.y(), Y_MAX));
     }
-    Point operator-(const Point& other) {
+    Point operator-(const Point& other) const {
         return Point(x_ - other.x(), y_ - other.y());
     }
-    Point operator-(const Vector2& speed) {
-        return Point(x_ - speed.x(), y_ - speed.y());
+    Point operator-(const Vector2& speed) const {
+        return Point(
+            min<uint>(x_ - speed.x(), X_MAX), min<uint>(y_ - speed.y(), Y_MAX));
     }
-    Point operator*(uint d) { return Point(d * x_, d * y_); }
+    Point operator*(uint d) const { return Point(d * x_, d * y_); }
 };
 
 enum class Type
@@ -541,7 +547,7 @@ public:
         return os;
     }
 
-private:
+protected:
     uint id_;
     Point p_;
     Type type_;
@@ -563,7 +569,6 @@ public:
         const Point& p,
         int shield,
         int is_controlled,
-
         uint health,
         int vx,
         int vy,
@@ -620,6 +625,21 @@ public:
         v_ = Vector2(vx, vy);
         has_target_ = has_target;
         threat_ = Threat(threat);
+    }
+
+    Monster simulate_next_turn() {
+        Point next = p_;
+        next.advance(v_);
+        return Monster(
+            id_,
+            next,
+            shield_ ? shield_-- : shield_,
+            false,
+            health_,
+            v_.x(),
+            v_.y(),
+            has_target_,
+            static_cast<int>(threat_));
     }
 
     friend std::ostream& operator<<(std::ostream& os, const Monster& m) {
@@ -708,8 +728,7 @@ public:
             } else if (dist > R_FOG_BASE) {
                 dest = dest_;
             } else {
-                dest = Opponent();
-                dest = dest - sign * kAttackerCircuit.at(2);
+                dest = Opponent() - sign * kAttackerCircuit.at(2);
             }
             dest_ = dest;
             return dest;
@@ -717,13 +736,11 @@ public:
 
         Point dest;
         if (dest_ == Home()) {
-            dest_ = Opponent();
-            dest_ = dest_ - sign * kAttackerCircuit.at(0);
+            dest_ = Opponent() - sign * kAttackerCircuit.at(0);
         } else if (this->dist_to(dest_) < R_FOG_HERO) {
             circuit_idx_++;
-            circuit_idx_ = circuit_idx_ % kAttackerCircuit.size();
-            dest_ = Opponent();
-            dest_ = dest_ - sign * kAttackerCircuit.at(circuit_idx_);
+            circuit_idx_ %= kAttackerCircuit.size();
+            dest_ = Opponent() - sign * kAttackerCircuit.at(circuit_idx_);
         }
         return dest_;
     }
@@ -813,8 +830,8 @@ public:
     }
 
     struct Closest {
-        double dist = 0.;
-        int id = -1;
+        double dist{0.};
+        int id{-1};
     };
 
     template<typename T>
@@ -870,6 +887,7 @@ public:
             });
         }
 
+        // defense
         try {
             // push away monster if too close of the baseCorner
             if (not dangers.empty()
@@ -934,8 +952,9 @@ public:
             }
         }
 
+        // attack
+        debug("attack");
         Hero& h = heroes.at(2);
-
         if (n <= NB_INIT) {
             if (not dangers.empty()) {
                 debug("Order: 2 => attack: ", monsters.at(dangers.front()).p());
@@ -949,10 +968,12 @@ public:
             }
         }
 
+        // wind monster to directly hit the opponent
+        debug("wind monster to directly hit the opponent");
         if (not h.is_done()) {
             for (const auto& [id, monster] : monsters) {
                 if (mana > 2 * MANA_COST
-                    and monster.dist_to(Opponent()) < R_BASE + WIND_MOV
+                    and monster.dist_to(Opponent()) < R_BASE + 2 * WIND_MOV
                     and monster.dist_to(h.p()) < R_WIND and not monster.shield())
                 {
                     debug("Order: 2 => wind to opp");
@@ -968,6 +989,8 @@ public:
             }
         }
 
+        // wind 3+ monsters to approach the opponent
+        debug("wind 3+ monsters to approach the opponent");
         if (not h.is_done()) {
             uint nb_target = h.get_nb_target(monsters);
             if (mana > 3 * MANA_COST and nb_target > 2) {
@@ -976,6 +999,8 @@ public:
             }
         }
 
+        // shield a monster
+        debug("shield a monster");
         if (not h.is_done()) {
             for (const auto& [id, monster] : monsters) {
                 if (mana > 5 * MANA_COST
@@ -990,6 +1015,8 @@ public:
             }
         }
 
+        // control a monster
+        debug("control a monster");
         if (not h.is_done()) {
             for (const auto& [id, monster] : monsters) {
                 if (mana > 3 * MANA_COST and monster.dist_to(h.p()) < R_CTRL
@@ -1003,13 +1030,19 @@ public:
             }
         }
 
+        // control a vilain
+        debug("control a vilain");
         if (not h.is_done()) {
             auto closest = get_closest(monsters, Opponent());
             for (const auto& [id, vilain] : vilains) {
                 if (mana > 3 * MANA_COST and vilain.dist_to(h.p()) < R_CTRL
-                    and vilain.dist_to(Opponent()) < R_FOG_BASE
-                    and vilain.dist_to(Opponent()) > closest.dist
-                    and not vilain.shield() and not vilain.is_controlled())
+                    and vilain.dist_to(Opponent()) < R_FOG_BASE - R_FOG_HERO
+                    and not vilain.shield() and not vilain.is_controlled()
+                    and (
+                        vilain.dist_to(Opponent()) < closest.dist
+                        or vilain.dist_to(monsters.at(closest.id).p()) < R_DMG
+                    )
+                    )
                 {
                     debug("Order: 2 => Control vilain: ", vilain);
                     h.order(Action::kControl, Home(), id);
@@ -1018,39 +1051,42 @@ public:
             }
         }
 
-        //             if (not h.is_done() and not others.empty()) {
-        //                 double min_dist = numeric_limits<double>::max();
-        //                 int closest = -1;
-        //                 for (int other : others) {
-        //                     double d = h.dist_to(monsters.at(other).p());
-        //                     if (d < min_dist) {
-        //                         min_dist = d;
-        //                         closest = other;
-        //                     }
-        //                 }
-        //                 debug("Order: 2 => attack: ", closest);
-        //                 h.order(Action::kMove,
-        //                 monsters.at(closest).p()); h.done();
-        //             }
-
-        if (not h.is_done() and h.is_pushing()) {
-            if (h.dist_to(Opponent()) < R_BASE) {
-                h.stop_push();
-            } else {
-                debug("Order: 2 => is pushing: ", Opponent());
-                h.order(Action::kMove, Opponent());
-                h.push(-1);
-            }
-        }
-
+        // scout or push
+        debug("scout or push");
         if (not h.is_done()) {
-            if (mana > 100) {
-                debug("Order: 2 => push: ", Opponent());
-                h.order(Action::kMove, Opponent());
+            Point dest;
+            if (h.is_pushing() && h.dist_to(Opponent()) < R_WIND) {
+                h.stop_push();
+                dest = h.scout();
+            } else if (mana > 100) {
                 h.push(5);
+                dest = Opponent();
+            } else if (h.is_pushing()) {
+                h.push(-1);
+                dest = Opponent();
             } else {
-                debug("Order: 2 => scout: ", h.scout());
-                h.order(Action::kMove, h.scout());
+                dest = h.scout();
+            }
+
+            const auto closest = get_closest(monsters, h);
+            if (closest.id != -1) {
+                debug("simulate_next_turn");
+                const Monster future = monsters.at(closest.id).simulate_next_turn();
+                const auto h_speed =
+                    Vector2::from_polar(HERO_MOV, (dest.vec() - h.p().vec()).theta());
+                if (future.dist_to(h.p() + h_speed) < R_DMG
+                    and h.dist_to(monsters.at(closest.id).p()) > R_DMG)
+                {
+                    const Vector2 h2m = h.p().vec() + h_speed - future.p().vec();
+                    const double t = h_speed.theta();
+                    const double r2 = pow_n(R_DMG, 2);
+                    const double v = (r2 - sum2(h2m.x(), h2m.y()))
+                                     / (2. * (h2m.y() * sin(t) + h2m.x() * cos(t)));
+                    debug("speed: from ", h_speed, " to ", Vector2::from_polar(v, t));
+                    dest = h.p() + Vector2::from_polar(v, t);
+                }
+                debug("Order: 2 => move: ", dest);
+                h.order(Action::kMove, dest);
             }
         }
 
@@ -1097,11 +1133,13 @@ int main() {
             int x;  // Position of this entity
             int y;
             int shield;  // Count down until shield spell fades
-            int is_controlled;  // Equals 1 when this entity is under a control spell
+            int is_controlled;  // Equals 1 when this entity is under a control
+                                // spell
             int health;  // Remaining health of this monster
             int vx;  // Trajectory of this monster
             int vy;
-            int has_target;  // 0=monster with no target yet, 1=monster targeting a base
+            int has_target;  // 0=monster with no target yet, 1=monster targeting a
+                             // base
             int threat;  // Given this monster's trajectory, is it a threat to
                          // 1=your base, 2=your opponent's base, 0=neither
             cin >> id >> type >> x >> y >> shield >> is_controlled >> health >> vx >> vy
