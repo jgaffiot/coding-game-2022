@@ -263,7 +263,7 @@ void debug(Args&&... args) {
 }
 
 // Some constants
-constexpr uint NB_INIT{20u};
+constexpr uint NB_INIT{40u};
 constexpr uint X_MIN{0u};
 constexpr uint Y_MIN{0u};
 constexpr uint X_MAX{17630u};
@@ -283,6 +283,7 @@ constexpr uint R_SHIELD{2200u};
 constexpr uint R_CTRL{2200u};
 constexpr uint MANA_COST{10u};
 constexpr uint MSTR_SHIELD_MOV = SHIELD_TIME * MSTR_MOV;
+uint MSTR_MIN_HEALTH{13u};
 
 //! A 2-dimension mathematical vector to represent speed
 class Vector2 {
@@ -709,7 +710,9 @@ public:
                 }
                 break;
         }
-        debug("nb push: ", nb_push_);
+        if (id_ == 2) {
+            debug("nb push: ", nb_push_);
+        }
         is_done_ = true;
     }
     bool is_done() const { return is_done_; }
@@ -853,6 +856,20 @@ public:
         return get_closest(group, entity.p());
     }
 
+    void hunt(uint id) {
+        Hero& h = heroes.at(id);
+        if (not dangers.empty()) {
+            debug("Order: ", id, " => attack: ", monsters.at(dangers.front()).p());
+            h.order(Action::kMove, monsters.at(dangers.front()).p());
+        } else if (not others.empty()) {
+            debug("Order: ", id, " => attack: ", monsters.at(others.front()).p());
+            h.order(Action::kMove, monsters.at(others.front()).p());
+        } else {
+            debug("Order: 2 => scout: ", h.scout());
+            h.order(Action::kMove, h.scout());
+        }
+    }
+
     void compute_heroes_action() {
         debug("compute_heroes_action");
         debug("monsters: ", monsters.size());
@@ -891,7 +908,7 @@ public:
         try {
             // push away monster if too close of the baseCorner
             if (not dangers.empty()
-                and monsters.at(dangers.front()).dist_to(Home()) < MSTR_MOV + R_WIND
+                and monsters.at(dangers.front()).dist_to(Home()) < 2u * R_WIND
                 and mana > MANA_COST)
             {
                 Monster& mstr = monsters.at(dangers.front());
@@ -954,18 +971,12 @@ public:
 
         // attack
         debug("attack");
+        if (n == 55) {
+            MSTR_MIN_HEALTH += 2;
+        }
         Hero& h = heroes.at(2);
         if (n <= NB_INIT) {
-            if (not dangers.empty()) {
-                debug("Order: 2 => attack: ", monsters.at(dangers.front()).p());
-                h.order(Action::kMove, monsters.at(dangers.front()).p());
-            } else if (not others.empty()) {
-                debug("Order: 2 => attack: ", monsters.at(others.front()).p());
-                h.order(Action::kMove, monsters.at(others.front()).p());
-            } else {
-                debug("Order: 2 => scout: ", h.scout());
-                h.order(Action::kMove, h.scout());
-            }
+            hunt(2);
         }
 
         // wind monster to directly hit the opponent
@@ -1021,7 +1032,8 @@ public:
             for (const auto& [id, monster] : monsters) {
                 if (mana > 3 * MANA_COST and monster.dist_to(h.p()) < R_CTRL
                     and monster.threat() != Threat::kOpp and not monster.shield()
-                    and not monster.is_controlled() and monster.health() > 15)
+                    and not monster.is_controlled()
+                    and monster.health() >= MSTR_MIN_HEALTH)
                 {
                     debug("Order: 2 => Control monster: ", monster);
                     h.order(Action::kControl, Opponent(), id);
@@ -1054,36 +1066,44 @@ public:
         // scout or push
         debug("scout or push");
         if (not h.is_done()) {
+            const auto closest = get_closest(monsters, h);
+            const bool retreat =
+                h.dist_to(Opponent()) < R_WIND
+                or (h.dist_to(Opponent()) < R_FOG_HERO
+                    and (closest.id == -1 or closest.dist > R_FOG_HERO));
             Point dest;
-            if (h.is_pushing() && h.dist_to(Opponent()) < R_WIND) {
+            if (h.is_pushing() and retreat) {
                 h.stop_push();
-                dest = h.scout();
-            } else if (mana > 100) {
+                hunt(2);
+            } else if (mana > 100 and not retreat) {
                 h.push(5);
                 dest = Opponent();
             } else if (h.is_pushing()) {
                 h.push(-1);
                 dest = Opponent();
+            } else if (mana < 5 * MANA_COST) {
+                hunt(2);
             } else {
                 dest = h.scout();
             }
-
-            const auto closest = get_closest(monsters, h);
-            if (closest.id != -1) {
-                debug("simulate_next_turn");
-                const Monster future = monsters.at(closest.id).simulate_next_turn();
-                const auto h_speed =
-                    Vector2::from_polar(HERO_MOV, (dest.vec() - h.p().vec()).theta());
-                if (future.dist_to(h.p() + h_speed) < R_DMG
-                    and h.dist_to(monsters.at(closest.id).p()) > R_DMG)
-                {
-                    const Vector2 h2m = h.p().vec() + h_speed - future.p().vec();
-                    const double t = h_speed.theta();
-                    const double r2 = pow_n(R_DMG, 2);
-                    const double v = (r2 - sum2(h2m.x(), h2m.y()))
-                                     / (2. * (h2m.y() * sin(t) + h2m.x() * cos(t)));
-                    debug("speed: from ", h_speed, " to ", Vector2::from_polar(v, t));
-                    dest = h.p() + Vector2::from_polar(v, t);
+            if (not h.is_done()) {
+                if (closest.id != -1) {
+                    debug("simulate_next_turn");
+                    const Monster future = monsters.at(closest.id).simulate_next_turn();
+                    const auto h_speed = Vector2::from_polar(
+                        HERO_MOV, (dest.vec() - h.p().vec()).theta());
+                    if (future.dist_to(h.p() + h_speed) < R_DMG
+                        and h.dist_to(monsters.at(closest.id).p()) > R_DMG)
+                    {
+                        const Vector2 h2m = h.p().vec() + h_speed - future.p().vec();
+                        const double t = h_speed.theta();
+                        const double r2 = pow_n(R_DMG, 2);
+                        const double v = (r2 - sum2(h2m.x(), h2m.y()))
+                                         / (2. * (h2m.y() * sin(t) + h2m.x() * cos(t)));
+                        debug(
+                            "speed: from ", h_speed, " to ", Vector2::from_polar(v, t));
+                        dest = h.p() + Vector2::from_polar(v, t);
+                    }
                 }
                 debug("Order: 2 => move: ", dest);
                 h.order(Action::kMove, dest);
