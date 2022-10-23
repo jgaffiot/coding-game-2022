@@ -965,210 +965,123 @@ public:
             return Monster::cmp(monsters.at(a), monsters.at(b));
         });
 
+        if (n >= 55) all_in = true;
+
+        if (all_in) {
+            debug("PHASE3");
+            bool go = true;
+            for (auto [_, h] : heroes)
+                go &= h.dist_to(Opponent()) <= GOAL_REACH + R_WIND;
+
+            for (auto [id, m] : monsters) {
+                if (m.dist_to(Opponent()) <= SETUP and not m.shield()) {
+                    if (go)
+                        for (auto [_, h] : heroes)
+                            h.order(Action::kWind, Opponent());
+                }
+            }
+
+            for (auto [id, m] : monsters) {
+                if (m.dist_to(Opponent()) <= SETUP + R_WIND and not m.shield()) {
+                    if (go)
+                        for (auto [_, h] : heroes) {
+                            if (h.dist_to(m.p()) <= R_WIND)
+                                h.order(Action::kWind, Opponent());
+                            break;
+                        }
+                }
+            }
+            for (auto [_, h] : heroes)
+                h.order(Action::kMove, kSetup[top_left]);
+            return;
+        } else if (n > 45) {
+            debug("PHASE2");
+            for (uint i = 0; i < NB_HEROES; i++) {
+                Hero& h = heroes.at(i);
+                for (auto [id, m] : monsters) {
+                    if (m.threat() != Threat::kOpp and not m.shield()
+                        and h.dist_to(m.p()) <= R_CTRL) {
+                        // Recruit
+                        h.order(Action::kControl, kSetup[top_left], id);
+                        break;
+                    }
+                }
+                h.order(Action::kMove, kSetup[top_left]);
+            }
+            return;
+        }
+
+        debug("phase1");
+
         for (uint i = 0; i < NB_HEROES; i++) {
             if (i == 0) {
-                // Hero& h = heroes.at(i);
-                // if (g_turn < 70) {
-                //     if (monsters.empty() || others.empty()) {
-                //         debug("// Positioning");
-                //         h.order(Action::kMove, kSpawn[! top_left][0]);
-                //     } else {
-                //         for (auto [id, m] : monsters) {
-                //             if (m.health() > 14 and not m.shield()
-                //                 and h.dist_to(m.p()) <= R_CTRL and mana >= 3 *
-                //                 MANA_COST and m.threat() != Threat::kOpp)
-                //             {
-                //                 debug("// Recruit sneaky");
-                //                 h.order(Action::kControl, kSneaky[top_left][1],
-                //                 m.id()); monsters.erase(m.id()); break;
-                //             }
-                //         }
-                //         if (! h.is_done()) {
-                //             debug("// Farm");
-                //             if (auto [dist, id] = get_closest(deque_to_map(others),
-                //             h);
-                //                 id != -1 and dist < 2 * HERO_MOV)
-                //             {
-                //                 h.order(Action::kMove, monsters.at(id).p());
-                //             } else {
-                //                 h.order(Action::kMove, kSpawn[! top_left][0]);
-                //             }
-                //         }
-                //     }
-                // } else {
-                //     if (monsters.empty()) {
-                //         debug("// Attack nothing");
-                //         h.order(Action::kMove, kOutpost[top_left]);
-                //     } else {
-                //         // Goal
-                //         for (auto [id, m] : monsters) {
-                //             if (h.dist_to(m.p()) <= R_WIND
-                //                 and m.dist_to(Opponent()) <= R_BASE + WIND_MOV
-                //                 and mana >= MANA_COST and not m.shield())
-                //             {
-                //                 debug("GOAL!!");
-                //                 h.order(Action::kWind, Opponent());
-                //                 break;
-                //             }
-                //         }
-                //         // Shield
-                //         for (auto [id, m] : monsters) {
-                //             if (h.dist_to(m.p()) <= R_SHIELD
-                //                 and m.threat() == Threat::kOpp and not
-                //                 m.soloable(m.p()) and mana >= MANA_COST)
-                //             {
-                //                 debug("GO THE DISTANCE");
-                //                 h.order(Action::kShield, Opponent(), id);
-                //                 break;
-                //             }
-                //         }
-                //         // Recruit
-                //         for (auto [id, m] : monsters) {
-                //             if (h.dist_to(m.p()) <= R_CTRL and m.health() > 13
-                //                 and m.threat() != Threat::kOpp and mana > 3 *
-                //                 MANA_COST)
-                //             {
-                //                 h.order(Action::kControl, kSneaky[top_left][1], id);
-                //                 break;
-                //             }
-                //         }
-                //         if (! h.is_done()) {
-                //             h.order(Action::kMove, kOutpost[top_left]);
-                //         }
-                //     }
-                // }
-                // // attack
-                // debug("attack");
-                Hero& h = heroes.at(0);
-                if (n <= NB_INIT) {
-                    if (not dangers.empty()) {
-                        h.order(Action::kMove, monsters.at(dangers.front()).p());
-                    } else if (not others.empty()) {
-                        h.order(Action::kMove, monsters.at(others.front()).p());
+                Hero& h = heroes.at(i);
+                if (g_turn < 70) {
+                    if (monsters.empty() || others.empty()) {
+                        debug("// Positioning");
+                        h.order(Action::kMove, kSpawn[! top_left][0]);
                     } else {
-                        h.order(Action::kMove, h.scout());
-                    }
-                }
-
-                // wind monster to directly hit the opponent
-                // debug("wind monster to directly hit the opponent");
-                if (not h.is_done()) {
-                    for (const auto& [id, monster] : monsters) {
-                        if (mana > 2 * MANA_COST
-                            and monster.dist_to(Opponent()) < R_BASE + 2 * WIND_MOV
-                            and monster.dist_to(h.p()) < R_WIND
-                            and not monster.shield())
-                        {
-                            h.order(Action::kWind, Opponent());
-                        } else if (
-                            mana > 3 * MANA_COST
-                            and monster.dist_to(Opponent()) < R_FOG_BASE
-                            and monster.dist_to(h.p()) < R_WIND and not monster.shield()
-                            and monster.health() > 15)
-                        {
-                            h.order(Action::kWind, Opponent());
+                        for (auto [id, m] : monsters) {
+                            if (m.health() > 14 and not m.shield()
+                                and h.dist_to(m.p()) <= R_CTRL and mana >= 3 * MANA_COST
+                                and m.threat() != Threat::kOpp)
+                            {
+                                debug("// Recruit sneaky");
+                                h.order(Action::kControl, kSneaky[top_left][1], m.id());
+                                monsters.erase(m.id());
+                                break;
+                            }
+                        }
+                        if (! h.is_done()) {
+                            debug("// Farm");
+                            if (auto [dist, id] = get_closest(deque_to_map(others), h);
+                                id != -1 and dist < 2 * HERO_MOV)
+                            {
+                                h.order(Action::kMove, monsters.at(id).p());
+                            } else {
+                                h.order(Action::kMove, kSpawn[! top_left][0]);
+                            }
                         }
                     }
-                }
-
-                // wind 3+ monsters to approach the opponent
-                // debug("wind 3+ monsters to approach the opponent");
-                if (not h.is_done()) {
-                    uint nb_target = h.get_nb_target(monsters);
-                    if (mana > 3 * MANA_COST and nb_target > 2) {
-                        h.order(Action::kWind, Opponent());
-                    }
-                }
-
-                // shield a monster
-                // debug("shield a monster");
-                if (not h.is_done()) {
-                    for (const auto& [id, monster] : monsters) {
-                        if (mana > 5 * MANA_COST
-                            and monster.dist_to(Opponent()) < MSTR_SHIELD_MOV - R_BASE
-                            and monster.dist_to(h.p()) < R_SHIELD
-                            and not monster.shield() and not monster.is_controlled())
-                        {
-                            h.order(Action::kShield, Home(), id);
-                            break;
-                        }
-                    }
-                }
-
-                // control a monster
-                // debug("control a monster");
-                if (not h.is_done()) {
-                    for (const auto& [id, monster] : monsters) {
-                        if (mana > 3 * MANA_COST and monster.dist_to(h.p()) < R_CTRL
-                            and monster.threat() != Threat::kOpp
-                            and not monster.shield() and not monster.is_controlled()
-                            and monster.health() > 15)
-                        {
-                            h.order(Action::kControl, Opponent(), id);
-                            break;
-                        }
-                    }
-                }
-
-                // control a vilain
-                // debug("control a vilain");
-                if (not h.is_done()) {
-                    auto closest = get_closest(monsters, Opponent());
-                    for (const auto& [id, vilain] : vilains) {
-                        if (mana > 3 * MANA_COST and vilain.dist_to(h.p()) < R_CTRL
-            and vilain.dist_to(Opponent()) < R_FOG_BASE - R_FOG_HERO
-            and not vilain.shield() and not vilain.is_controlled()
-            and (
-                vilain.dist_to(Opponent()) < closest.dist
-                or vilain.dist_to(monsters.at(closest.id).p()) < R_DMG
-            )
-            )
-                        {
-                            h.order(Action::kControl, Home(), id);
-                            break;
-                        }
-                    }
-                }
-
-                // scout or push
-                // debug("scout or push");
-                if (not h.is_done()) {
-                    Point dest;
-                    if (h.is_pushing() && h.dist_to(Opponent()) < R_WIND) {
-                        h.stop_push();
-                        dest = h.scout();
-                    } else if (mana > 100) {
-                        h.push(5);
-                        dest = Opponent();
-                    } else if (h.is_pushing()) {
-                        h.push(-1);
-                        dest = Opponent();
+                } else {
+                    if (monsters.empty()) {
+                        debug("// Attack nothing");
+                        h.order(Action::kMove, kOutpost[top_left]);
                     } else {
-                        dest = h.scout();
-                    }
-
-                    const auto closest = get_closest(monsters, h);
-                    if (closest.id != -1) {
-                        // debug("simulate_next_turn");
-                        const Monster future =
-                            monsters.at(closest.id).simulate_next_turn();
-                        const auto h_speed = Vector2::from_polar(
-                            HERO_MOV, (dest.vec() - h.p().vec()).theta());
-                        if (future.dist_to(h.p() + h_speed) < R_DMG
-                            and h.dist_to(monsters.at(closest.id).p()) > R_DMG)
-                        {
-                            const Vector2 h2m =
-                                h.p().vec() + h_speed - future.p().vec();
-                            const double t = h_speed.theta();
-                            const double r2 = pow_n(R_DMG, 2);
-                            const double v =
-                                (r2 - sum2(h2m.x(), h2m.y()))
-                                / (2. * (h2m.y() * sin(t) + h2m.x() * cos(t)));
-                            // debug("speed: from ", h_speed, " to ",
-                            // Vector2::from_polar(v, t));
-                            dest = h.p() + Vector2::from_polar(v, t);
+                        // Goal
+                        for (auto [id, m] : monsters) {
+                            if (h.dist_to(m.p()) <= R_WIND
+                                and m.dist_to(Opponent()) <= R_BASE + WIND_MOV
+                                and mana >= MANA_COST and not m.shield())
+                            {
+                                debug("GOAL!!");
+                                h.order(Action::kWind, Opponent());
+                                break;
+                            }
                         }
-                        h.order(Action::kMove, dest);
+                        // Shield
+                        for (auto [id, m] : monsters) {
+                            if (h.dist_to(m.p()) <= R_SHIELD
+                                and m.threat() == Threat::kOpp and not m.soloable(m.p())
+                                and mana >= MANA_COST)
+                            {
+                                debug("GO THE DISTANCE");
+                                h.order(Action::kShield, Opponent(), id);
+                                break;
+                            }
+                        }
+                        // Recruit
+                        for (auto [id, m] : monsters) {
+                            if (h.dist_to(m.p()) <= R_CTRL and m.health() > 13
+                                and m.threat() != Threat::kOpp and mana > 3 * MANA_COST)
+                            {
+                                h.order(Action::kControl, kSneaky[top_left][1], id);
+                                break;
+                            }
+                        }
+                        if (! h.is_done()) {
+                            h.order(Action::kMove, kOutpost[top_left]);
+                        }
                     }
                 }
             } else {
@@ -1327,3 +1240,131 @@ int main() {
         solver.print_order();
     }
 }
+
+// // attack
+// //debug("attack");
+// Hero& h = heroes.at(0);
+// if (n <= NB_INIT) {
+//     if (not dangers.empty()) {
+//         h.order(Action::kMove, monsters.at(dangers.front()).p());
+//     } else if (not others.empty()) {
+//         h.order(Action::kMove, monsters.at(others.front()).p());
+//     } else {
+//         h.order(Action::kMove, h.scout());
+//     }
+// }
+
+// // wind monster to directly hit the opponent
+// //debug("wind monster to directly hit the opponent");
+// if (not h.is_done()) {
+//     for (const auto& [id, monster] : monsters) {
+//         if (mana > 2 * MANA_COST
+//             and monster.dist_to(Opponent()) < R_BASE + 2 * WIND_MOV
+//             and monster.dist_to(h.p()) < R_WIND and not monster.shield())
+//         {
+//             h.order(Action::kWind, Opponent());
+//         } else if (
+//             mana > 3 * MANA_COST and monster.dist_to(Opponent()) < R_FOG_BASE
+//             and monster.dist_to(h.p()) < R_WIND and not monster.shield()
+//             and monster.health() > 15)
+//         {
+//             h.order(Action::kWind, Opponent());
+//         }
+//     }
+// }
+
+// // wind 3+ monsters to approach the opponent
+// //debug("wind 3+ monsters to approach the opponent");
+// if (not h.is_done()) {
+//     uint nb_target = h.get_nb_target(monsters);
+//     if (mana > 3 * MANA_COST and nb_target > 2) {
+//         h.order(Action::kWind, Opponent());
+//     }
+// }
+
+// // shield a monster
+// //debug("shield a monster");
+// if (not h.is_done()) {
+//     for (const auto& [id, monster] : monsters) {
+//         if (mana > 5 * MANA_COST
+//             and monster.dist_to(Opponent()) < MSTR_SHIELD_MOV - R_BASE
+//             and monster.dist_to(h.p()) < R_SHIELD and not monster.shield()
+//             and not monster.is_controlled())
+//         {
+//             h.order(Action::kShield, Home(), id);
+//             break;
+//         }
+//     }
+// }
+
+// // control a monster
+// //debug("control a monster");
+// if (not h.is_done()) {
+//     for (const auto& [id, monster] : monsters) {
+//         if (mana > 3 * MANA_COST and monster.dist_to(h.p()) < R_CTRL
+//             and monster.threat() != Threat::kOpp and not monster.shield()
+//             and not monster.is_controlled() and monster.health() > 15)
+//         {
+//             h.order(Action::kControl, Opponent(), id);
+//             break;
+//         }
+//     }
+// }
+
+// // control a vilain
+// //debug("control a vilain");
+// if (not h.is_done()) {
+//     auto closest = get_closest(monsters, Opponent());
+//     for (const auto& [id, vilain] : vilains) {
+//         if (mana > 3 * MANA_COST and vilain.dist_to(h.p()) < R_CTRL
+//             and vilain.dist_to(Opponent()) < R_FOG_BASE - R_FOG_HERO
+//             and not vilain.shield() and not vilain.is_controlled()
+//             and (
+//                 vilain.dist_to(Opponent()) < closest.dist
+//                 or vilain.dist_to(monsters.at(closest.id).p()) < R_DMG
+//             )
+//             )
+//         {
+//             h.order(Action::kControl, Home(), id);
+//             break;
+//         }
+//     }
+// }
+
+// // scout or push
+// //debug("scout or push");
+// if (not h.is_done()) {
+//     Point dest;
+//     if (h.is_pushing() && h.dist_to(Opponent()) < R_WIND) {
+//         h.stop_push();
+//         dest = h.scout();
+//     } else if (mana > 100) {
+//         h.push(5);
+//         dest = Opponent();
+//     } else if (h.is_pushing()) {
+//         h.push(-1);
+//         dest = Opponent();
+//     } else {
+//         dest = h.scout();
+//     }
+
+//     const auto closest = get_closest(monsters, h);
+//     if (closest.id != -1) {
+//         //debug("simulate_next_turn");
+//         const Monster future = monsters.at(closest.id).simulate_next_turn();
+//         const auto h_speed =
+//             Vector2::from_polar(HERO_MOV, (dest.vec() - h.p().vec()).theta());
+//         if (future.dist_to(h.p() + h_speed) < R_DMG
+//             and h.dist_to(monsters.at(closest.id).p()) > R_DMG)
+//         {
+//             const Vector2 h2m = h.p().vec() + h_speed - future.p().vec();
+//             const double t = h_speed.theta();
+//             const double r2 = pow_n(R_DMG, 2);
+//             const double v = (r2 - sum2(h2m.x(), h2m.y()))
+//                             / (2. * (h2m.y() * sin(t) + h2m.x() * cos(t)));
+//             //debug("speed: from ", h_speed, " to ", Vector2::from_polar(v, t));
+//             dest = h.p() + Vector2::from_polar(v, t);
+//         }
+//         h.order(Action::kMove, dest);
+//     }
+// }
